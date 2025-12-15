@@ -1,5 +1,11 @@
 # lambdaverse
 
+## 0.5.2
+
+### Patch Changes
+
+- bf02981: Fix bug with service layer inference when class has static properties
+
 ## 0.5.1
 
 ### Patch Changes
