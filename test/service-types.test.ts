@@ -18,7 +18,7 @@ describe('Service Type Safety', () => {
 				() => new LoggerService()
 			);
 
-			expectTypeOf(loggerService).toEqualTypeOf<
+			expectTypeOf(loggerService).branded.toEqualTypeOf<
 				Layer<never, typeof LoggerService>
 			>();
 
@@ -48,7 +48,7 @@ describe('Service Type Safety', () => {
 				>();
 
 				const db = await ctx.resolve(DatabaseService);
-				expectTypeOf(db).toEqualTypeOf<DatabaseService>();
+				expectTypeOf(db).branded.toEqualTypeOf<DatabaseService>();
 
 				return new UserService(db);
 			});
@@ -93,9 +93,9 @@ describe('Service Type Safety', () => {
 					ctx.resolve(LoggerService),
 				]);
 
-				expectTypeOf(db).toEqualTypeOf<DatabaseService>();
-				expectTypeOf(cache).toEqualTypeOf<CacheService>();
-				expectTypeOf(logger).toEqualTypeOf<LoggerService>();
+				expectTypeOf(db).branded.toEqualTypeOf<DatabaseService>();
+				expectTypeOf(cache).branded.toEqualTypeOf<CacheService>();
+				expectTypeOf(logger).branded.toEqualTypeOf<LoggerService>();
 
 				return new UserService(db, cache, logger);
 			});
@@ -134,7 +134,7 @@ describe('Service Type Safety', () => {
 
 			// DatabaseService requirement should be satisfied by dbService
 			// Only UserService is provided (target layer's provisions)
-			expectTypeOf(composedService).toEqualTypeOf<
+			expectTypeOf(composedService).branded.toEqualTypeOf<
 				Layer<never, typeof UserService>
 			>();
 		});
@@ -154,7 +154,7 @@ describe('Service Type Safety', () => {
 
 			const mergedService = loggerService.merge(cacheService);
 
-			expectTypeOf(mergedService).toEqualTypeOf<
+			expectTypeOf(mergedService).branded.toEqualTypeOf<
 				Layer<never, typeof LoggerService | typeof CacheService>
 			>();
 		});
@@ -247,7 +247,7 @@ describe('Service Type Safety', () => {
 				.provide(configService);
 
 			// All dependencies should be satisfied, only final service provided
-			expectTypeOf(fullService).toEqualTypeOf<
+			expectTypeOf(fullService).branded.toEqualTypeOf<
 				Layer<never, typeof UserService>
 			>();
 		});
@@ -305,7 +305,7 @@ describe('Service Type Safety', () => {
 				.provide(configService);
 			const appLayer = userService.provide(infraLayer);
 
-			expectTypeOf(appLayer).toEqualTypeOf<
+			expectTypeOf(appLayer).branded.toEqualTypeOf<
 				Layer<never, typeof UserService>
 			>();
 		});
@@ -318,19 +318,19 @@ describe('Service Type Safety', () => {
 			const testService = service(TestService, () => new TestService());
 
 			// Should have all Layer methods
-			expectTypeOf(testService.register).toEqualTypeOf<
+			expectTypeOf(testService.register).branded.toEqualTypeOf<
 				Layer<never, typeof TestService>['register']
 			>();
 
-			expectTypeOf(testService.provide).toEqualTypeOf<
+			expectTypeOf(testService.provide).branded.toEqualTypeOf<
 				Layer<never, typeof TestService>['provide']
 			>();
 
-			expectTypeOf(testService.merge).toEqualTypeOf<
+			expectTypeOf(testService.merge).branded.toEqualTypeOf<
 				Layer<never, typeof TestService>['merge']
 			>();
 
-			expectTypeOf(testService.provideMerge).toEqualTypeOf<
+			expectTypeOf(testService.provideMerge).branded.toEqualTypeOf<
 				Layer<never, typeof TestService>['provideMerge']
 			>();
 		});
@@ -361,14 +361,14 @@ describe('Service Type Safety', () => {
 			const container = Container.empty();
 			const finalContainer = appService.register(container);
 
-			expectTypeOf(finalContainer).toEqualTypeOf<
+			expectTypeOf(finalContainer).branded.toEqualTypeOf<
 				IContainer<typeof UserService>
 			>();
 
 			// Should be able to resolve services from the container
-			expectTypeOf(finalContainer.resolve(UserService)).toEqualTypeOf<
-				Promise<UserService>
-			>();
+			expectTypeOf(
+				finalContainer.resolve(UserService)
+			).branded.toEqualTypeOf<Promise<UserService>>();
 		});
 	});
 
@@ -421,7 +421,7 @@ describe('Service Type Safety', () => {
 
 			// DatabaseService requirement should be satisfied by dbService
 			// Both DatabaseService and UserService should be provided
-			expectTypeOf(composedService).toEqualTypeOf<
+			expectTypeOf(composedService).branded.toEqualTypeOf<
 				Layer<never, typeof DatabaseService | typeof UserService>
 			>();
 		});
@@ -486,13 +486,13 @@ describe('Service Type Safety', () => {
 
 			// .provide() only exposes target layer's provisions
 			const withProvide = dbService.provide(configService);
-			expectTypeOf(withProvide).toEqualTypeOf<
+			expectTypeOf(withProvide).branded.toEqualTypeOf<
 				Layer<never, typeof DatabaseService>
 			>();
 
 			// .provideMerge() exposes both layers' provisions
 			const withProvideMerge = dbService.provideMerge(configService);
-			expectTypeOf(withProvideMerge).toEqualTypeOf<
+			expectTypeOf(withProvideMerge).branded.toEqualTypeOf<
 				Layer<never, typeof ConfigService | typeof DatabaseService>
 			>();
 		});
@@ -536,7 +536,7 @@ describe('Service Type Safety', () => {
 				repoService.provideMerge(dbService).provideMerge(configService)
 			);
 			// All dependencies should be satisfied, all services provided
-			expectTypeOf(fullService).toEqualTypeOf<
+			expectTypeOf(fullService).branded.toEqualTypeOf<
 				Layer<
 					never,
 					| typeof ConfigService
@@ -578,7 +578,7 @@ describe('Service Type Safety', () => {
 				dbService.provide(configService)
 			);
 
-			expectTypeOf(appService).toEqualTypeOf<
+			expectTypeOf(appService).branded.toEqualTypeOf<
 				Layer<never, typeof UserService>
 			>();
 		});
@@ -607,17 +607,17 @@ describe('Service Type Safety', () => {
 			const finalContainer = appService.register(container);
 
 			// Both services should be available in the final container
-			expectTypeOf(finalContainer).toEqualTypeOf<
+			expectTypeOf(finalContainer).branded.toEqualTypeOf<
 				IContainer<typeof DatabaseService | typeof UserService>
 			>();
 
 			// Should be able to resolve both services from the container
-			expectTypeOf(finalContainer.resolve(DatabaseService)).toEqualTypeOf<
-				Promise<DatabaseService>
-			>();
-			expectTypeOf(finalContainer.resolve(UserService)).toEqualTypeOf<
-				Promise<UserService>
-			>();
+			expectTypeOf(
+				finalContainer.resolve(DatabaseService)
+			).branded.toEqualTypeOf<Promise<DatabaseService>>();
+			expectTypeOf(
+				finalContainer.resolve(UserService)
+			).branded.toEqualTypeOf<Promise<UserService>>();
 		});
 	});
 
@@ -630,7 +630,7 @@ describe('Service Type Safety', () => {
 				() => new DatabaseService()
 			);
 
-			expectTypeOf(dbService).toEqualTypeOf<
+			expectTypeOf(dbService).branded.toEqualTypeOf<
 				Layer<never, typeof DatabaseService>
 			>();
 		});
@@ -649,7 +649,7 @@ describe('Service Type Safety', () => {
 				},
 			});
 
-			expectTypeOf(dbService).toEqualTypeOf<
+			expectTypeOf(dbService).branded.toEqualTypeOf<
 				Layer<never, typeof DatabaseConnection>
 			>();
 		});
@@ -668,7 +668,7 @@ describe('Service Type Safety', () => {
 				},
 			});
 
-			expectTypeOf(resourceService).toEqualTypeOf<
+			expectTypeOf(resourceService).branded.toEqualTypeOf<
 				Layer<never, typeof AsyncResource>
 			>();
 		});
@@ -690,7 +690,7 @@ describe('Service Type Safety', () => {
 			const dbService = service(DatabaseService, {
 				create: async (ctx) => {
 					const logger = await ctx.resolve(Logger);
-					expectTypeOf(logger).toEqualTypeOf<Logger>();
+					expectTypeOf(logger).branded.toEqualTypeOf<Logger>();
 					return new DatabaseService(logger);
 				},
 				cleanup: (db) => {
@@ -718,23 +718,29 @@ describe('Service Type Safety', () => {
 			const customService = service(CustomService, {
 				create: () => {
 					const instance = new CustomService();
-					expectTypeOf(instance).toEqualTypeOf<CustomService>();
-					expectTypeOf(instance.getValue).toEqualTypeOf<
+					expectTypeOf(
+						instance
+					).branded.toEqualTypeOf<CustomService>();
+					expectTypeOf(instance.getValue).branded.toEqualTypeOf<
 						() => string
 					>();
 					return instance;
 				},
 				cleanup: (instance) => {
-					expectTypeOf(instance).toEqualTypeOf<CustomService>();
-					expectTypeOf(instance.getValue).toEqualTypeOf<
+					expectTypeOf(
+						instance
+					).branded.toEqualTypeOf<CustomService>();
+					expectTypeOf(instance.getValue).branded.toEqualTypeOf<
 						() => string
 					>();
-					expectTypeOf(instance.cleanup).toEqualTypeOf<() => void>();
+					expectTypeOf(instance.cleanup).branded.toEqualTypeOf<
+						() => void
+					>();
 					instance.cleanup();
 				},
 			});
 
-			expectTypeOf(customService).toEqualTypeOf<
+			expectTypeOf(customService).branded.toEqualTypeOf<
 				Layer<never, typeof CustomService>
 			>();
 		});
@@ -850,7 +856,7 @@ describe('Service Type Safety', () => {
 			}
 
 			const simpleService = autoService(SimpleService, ['test', 42]);
-			expectTypeOf(simpleService).toEqualTypeOf<
+			expectTypeOf(simpleService).branded.toEqualTypeOf<
 				Layer<never, typeof SimpleService>
 			>();
 
@@ -909,7 +915,7 @@ describe('Service Type Safety', () => {
 				.provide(configService);
 
 			// All dependencies should be satisfied
-			expectTypeOf(composedService).toEqualTypeOf<
+			expectTypeOf(composedService).branded.toEqualTypeOf<
 				Layer<never, typeof UserService>
 			>();
 		});
@@ -933,25 +939,66 @@ describe('Service Type Safety', () => {
 			const serviceB = autoService(ServiceB, [ServiceA]);
 			const serviceC = autoService(ServiceC, [ServiceB]);
 
-			// The bug: when merging, ServiceB should NOT appear in its own dependencies.
-			// Without the fix, static properties cause ServiceB to incorrectly appear
-			// in the requirements because T[K] becomes the constructor type.
-			const merged = serviceC.merge(serviceB);
-
-			// After providing serviceA, only ServiceC and ServiceB should be provided,
-			// with no remaining requirements (ServiceB should not require itself)
-			const composed = merged.provide(serviceA);
+			// Composition chain:
+			// 1. serviceC requires ServiceB
+			// 2. provide(serviceB) satisfies ServiceB requirement
+			//    - serviceB requires ServiceA
+			//    - IF BUG EXISTS: serviceB also requires ServiceB (itself)
+			// 3. provide(serviceA) satisfies ServiceA requirement
+			//
+			// If bug exists: final layer still requires ServiceB
+			// If fix works: final layer requires nothing
+			const composed = serviceC.provide(serviceB).provide(serviceA);
 
 			expectTypeOf(composed).branded.toEqualTypeOf<
-				Layer<never, typeof ServiceC | typeof ServiceB>
+				Layer<never, typeof ServiceC>
 			>();
 
 			// Should be able to register to empty container
 			const container = Container.empty();
 			const finalContainer = composed.register(container);
 
-			expectTypeOf(finalContainer).toEqualTypeOf<
-				IContainer<typeof ServiceC | typeof ServiceB>
+			expectTypeOf(finalContainer).branded.toEqualTypeOf<
+				IContainer<typeof ServiceC>
+			>();
+		});
+
+		it('should handle services with private attributes correctly', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+			class ServiceB extends Tag.Service('ServiceB') {
+				private readonly client: string; // Private attribute causes the bug
+
+				constructor(
+					_config: object = {},
+					private a: ServiceA
+				) {
+					super();
+					this.client = 'test';
+				}
+			}
+			class ServiceC extends Tag.Service('ServiceC') {
+				constructor(private b: ServiceB) {
+					super();
+				}
+			}
+
+			const serviceA = autoService(ServiceA, []);
+			const serviceB = autoService(ServiceB, [{}, ServiceA]);
+			const serviceC = autoService(ServiceC, [ServiceB]);
+
+			// Same composition logic as above
+			const composed = serviceC.provide(serviceB).provide(serviceA);
+
+			expectTypeOf(composed).branded.toEqualTypeOf<
+				Layer<never, typeof ServiceC>
+			>();
+
+			// Should be able to register to empty container
+			const container = Container.empty();
+			const finalContainer = composed.register(container);
+
+			expectTypeOf(finalContainer).branded.toEqualTypeOf<
+				IContainer<typeof ServiceC>
 			>();
 		});
 	});

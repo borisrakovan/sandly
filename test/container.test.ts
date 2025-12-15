@@ -172,7 +172,9 @@ describe('DependencyContainer', () => {
 			{
 				constructor(private value: string) {}
 
-				async create(ctx: ResolutionContext<typeof Logger>): Promise<TestService> {
+				async create(
+					ctx: ResolutionContext<typeof Logger>
+				): Promise<TestService> {
 					const logger = await ctx.resolve(Logger);
 					return new TestService(logger, this.value);
 				}

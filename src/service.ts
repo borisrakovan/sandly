@@ -24,6 +24,17 @@ export type ConstructorParams<T extends ServiceTag<TagId, unknown>> =
 	T extends new (...args: infer A) => unknown ? A : never;
 
 /**
+ * Helper to normalize a tag type.
+ * For ServiceTags, this strips away extra static properties of the class constructor,
+ * reducing it to the canonical ServiceTag<Id, Instance> form.
+ * @internal
+ */
+export type CanonicalTag<T extends AnyTag> =
+	T extends ServiceTag<infer Id, infer Instance>
+		? ServiceTag<Id, Instance>
+		: T;
+
+/**
  * Extracts only dependency tags from a constructor parameter list.
  * Filters out non‑DI parameters.
  *
@@ -41,11 +52,11 @@ export type ExtractConstructorDeps<T extends readonly unknown[]> =
 				}
 					? // Service tag
 						Id extends TagId
-						? // Extract instance type from constructor to handle classes with static properties.
-							// Without this, static properties cause T[K] to be the class constructor type
-							// (including static members), but ServiceTag expects the instance type.
-							// This causes the service to incorrectly appear in its own dependencies union.
-							T[K] extends new (...args: unknown[]) => infer Instance
+						? // Use canonical tag form (stripped of statics) to ensure
+							// requirements match provisions in Layer composition.
+							T[K] extends new (
+								...args: unknown[]
+							) => infer Instance
 							? ServiceTag<Id, Instance>
 							: ServiceTag<Id, T[K]>
 						: never
@@ -70,11 +81,10 @@ export type InferConstructorDepsTuple<T extends readonly unknown[]> =
 				}
 					? // Service tag
 						Id extends TagId
-						? // Extract instance type from constructor to handle classes with static properties.
-							// Without this, static properties cause T[K] to be the class constructor type
-							// (including static members), but ServiceTag expects the instance type.
-							// This causes the service to incorrectly appear in its own dependencies union.
-							T[K] extends new (...args: unknown[]) => infer Instance
+						? // Use canonical tag form
+							T[K] extends new (
+								...args: unknown[]
+							) => infer Instance
 							? ServiceTag<Id, Instance>
 							: ServiceTag<Id, T[K]>
 						: never
@@ -146,12 +156,14 @@ export type ServiceDepsTuple<T extends ServiceTag<TagId, unknown>> =
 export function service<T extends ServiceTag<TagId, unknown>>(
 	tag: T,
 	spec: DependencySpec<T, ServiceDependencies<T>>
-): Layer<ServiceDependencies<T>, T> {
-	return layer<ServiceDependencies<T>, T>(
+): Layer<ServiceDependencies<T>, CanonicalTag<T>> {
+	return layer<ServiceDependencies<T>, CanonicalTag<T>>(
 		<TContainer extends AnyTag>(
 			container: IContainer<TContainer | ServiceDependencies<T>>
 		) => {
-			return container.register(tag, spec);
+			return container.register(tag, spec) as IContainer<
+				TContainer | ServiceDependencies<T> | CanonicalTag<T>
+			>;
 		}
 	);
 }
@@ -268,7 +280,7 @@ export type AutoServiceSpec<T extends ServiceTag<TagId, unknown>> =
 export function autoService<T extends ServiceTag<TagId, unknown>>(
 	tag: T,
 	spec: AutoServiceSpec<T>
-): Layer<ServiceDependencies<T>, T> {
+): Layer<ServiceDependencies<T>, CanonicalTag<T>> {
 	if (Array.isArray(spec)) {
 		spec = { dependencies: spec };
 	}
