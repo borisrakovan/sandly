@@ -1,5 +1,11 @@
 # lambdaverse
 
+## 0.5.3
+
+### Patch Changes
+
+- 845edca: Fix type inference when using service layer on class with static props
+
 ## 0.5.2
 
 ### Patch Changes
