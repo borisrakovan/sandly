@@ -97,9 +97,10 @@ describe('DependencyContainer', () => {
 				cleanup = vi.fn() as () => void;
 			}
 
-			class TestServiceLifecycle
-				implements DependencyLifecycle<TestService, never>
-			{
+			class TestServiceLifecycle implements DependencyLifecycle<
+				TestService,
+				never
+			> {
 				create(): TestService {
 					return new TestService();
 				}
@@ -128,9 +129,10 @@ describe('DependencyContainer', () => {
 				}
 			}
 
-			class SimpleServiceLifecycle
-				implements DependencyLifecycle<TestService, never>
-			{
+			class SimpleServiceLifecycle implements DependencyLifecycle<
+				TestService,
+				never
+			> {
 				create(): TestService {
 					return new TestService();
 				}
@@ -167,9 +169,10 @@ describe('DependencyContainer', () => {
 				}
 			}
 
-			class TestServiceLifecycle
-				implements DependencyLifecycle<TestService, typeof Logger>
-			{
+			class TestServiceLifecycle implements DependencyLifecycle<
+				TestService,
+				typeof Logger
+			> {
 				constructor(private value: string) {}
 
 				async create(

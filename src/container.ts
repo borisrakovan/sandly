@@ -231,9 +231,9 @@ export type ResolutionContext<TTags extends AnyTag> = Pick<
  * for circular dependency detection.
  * @internal
  */
-class ResolutionContextImpl<TTags extends AnyTag>
-	implements ResolutionContext<TTags>
-{
+class ResolutionContextImpl<
+	TTags extends AnyTag,
+> implements ResolutionContext<TTags> {
 	constructor(
 		private readonly resolveFn: (tag: AnyTag) => Promise<unknown>
 	) {}
