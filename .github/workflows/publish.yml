@@ -1,4 +1,4 @@
-name: Publish (OIDC Trusted Publishing)
+name: Publish
 
 on:
   workflow_dispatch:
@@ -40,6 +40,5 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      # Do NOT set NODE_AUTH_TOKEN - npm will use OIDC automatically
       - name: Publish to npm
         run: npm publish --access public
