@@ -1,18 +1,10 @@
-import { Container, IContainer } from './container.js';
+import { Container, ContainerTags, IContainer } from './container.js';
 import { ScopedContainer } from './scoped-container.js';
 import { AnyTag } from './tag.js';
 import { Contravariant, Covariant } from './types.js';
 
 /**
- * Extracts the registration type (TReg) from a container type.
- * Works with both IContainer and Container.
- * @internal
- */
-export type ExtractContainerReg<C> =
-	C extends IContainer<infer TReg> ? TReg : never;
-
-/**
- * Replaces the TReg type parameter in a container type with a new type.
+ * Replaces the TTags type parameter in a container type with a new type.
  * Preserves the concrete container type (Container, ScopedContainer, or IContainer).
  *
  * Uses contravariance to detect container types:
@@ -21,12 +13,12 @@ export type ExtractContainerReg<C> =
  * - Falls back to IContainer for anything else
  * @internal
  */
-export type WithContainerReg<TContainer, TNewReg extends AnyTag> =
+export type WithContainerTags<TContainer, TNewTags extends AnyTag> =
 	TContainer extends ScopedContainer<never>
-		? ScopedContainer<TNewReg>
+		? ScopedContainer<TNewTags>
 		: TContainer extends Container<never>
-			? Container<TNewReg>
-			: IContainer<TNewReg>;
+			? Container<TNewTags>
+			: IContainer<TNewTags>;
 
 /**
  * The most generic layer type that accepts any concrete layer.
@@ -139,10 +131,7 @@ export interface Layer<
 	 */
 	register: <TContainer extends IContainer<TRequires>>(
 		container: TContainer
-	) => WithContainerReg<
-		TContainer,
-		ExtractContainerReg<TContainer> | TProvides
-	>;
+	) => WithContainerTags<TContainer, ContainerTags<TContainer> | TProvides>;
 
 	/**
 	 * Provides a dependency layer to this layer, creating a pipeline where the dependency layer's
@@ -316,9 +305,9 @@ export function layer<
 		register: <TContainer extends IContainer<TRequires>>(
 			container: TContainer
 		) =>
-			register(container) as WithContainerReg<
+			register(container) as WithContainerTags<
 				TContainer,
-				ExtractContainerReg<TContainer> | TProvides
+				ContainerTags<TContainer> | TProvides
 			>,
 		provide(dependency) {
 			return createProvidedLayer(dependency, layerImpl);

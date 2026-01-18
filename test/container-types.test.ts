@@ -534,7 +534,7 @@ describe('DependencyContainer Type Safety', () => {
 				IContainer<typeof ServiceA>
 			>();
 
-			// Container contravariance (should work now with 'in TReg')
+			// Container contravariance (should work now with 'in TTags')
 			const containerContravariant: Container<typeof ServiceA> =
 				containerAB;
 			expectTypeOf(containerContravariant).toEqualTypeOf<

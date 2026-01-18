@@ -1,8 +1,8 @@
+import { constant } from '@/constant.js';
 import { Container } from '@/container.js';
 import { dependency } from '@/dependency.js';
 import { Layer } from '@/layer.js';
 import { Tag } from '@/tag.js';
-import { constant } from '@/constant.js';
 import { describe, expect, it } from 'vitest';
 
 describe('dependency', () => {

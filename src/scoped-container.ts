@@ -9,13 +9,13 @@ import { AnyTag, TagType } from './tag.js';
 export type Scope = string | symbol;
 
 // @ts-expect-error - ScopedContainer overrides the empty method
-export class ScopedContainer<TReg extends AnyTag> extends Container<TReg> {
+export class ScopedContainer<TTags extends AnyTag> extends Container<TTags> {
 	public readonly scope: Scope;
 
-	private parent: IContainer<TReg> | null;
-	private readonly children: WeakRef<ScopedContainer<TReg>>[] = [];
+	private parent: IContainer<TTags> | null;
+	private readonly children: WeakRef<ScopedContainer<TTags>>[] = [];
 
-	protected constructor(parent: IContainer<TReg> | null, scope: Scope) {
+	protected constructor(parent: IContainer<TTags> | null, scope: Scope) {
 		super();
 		this.parent = parent;
 		this.scope = scope;
@@ -38,10 +38,10 @@ export class ScopedContainer<TReg extends AnyTag> extends Container<TReg> {
 	 */
 	override register<T extends AnyTag>(
 		tag: T,
-		spec: DependencySpec<T, TReg>
-	): ScopedContainer<TReg | T> {
+		spec: DependencySpec<T, TTags>
+	): ScopedContainer<TTags | T> {
 		super.register(tag, spec);
-		return this as ScopedContainer<TReg | T>;
+		return this as ScopedContainer<TTags | T>;
 	}
 
 	/**
@@ -85,7 +85,7 @@ export class ScopedContainer<TReg extends AnyTag> extends Container<TReg> {
 	 * 3. Otherwise, delegate to parent scope
 	 * 4. If no parent or parent doesn't have it, throw UnknownDependencyError
 	 */
-	override async resolve<T extends TReg>(tag: T): Promise<TagType<T>> {
+	override async resolve<T extends TTags>(tag: T): Promise<TagType<T>> {
 		return this.resolveInternal(tag, []);
 	}
 
@@ -93,7 +93,7 @@ export class ScopedContainer<TReg extends AnyTag> extends Container<TReg> {
 	 * Internal resolution with delegation logic for scoped containers.
 	 * @internal
 	 */
-	protected override resolveInternal<T extends TReg>(
+	protected override resolveInternal<T extends TTags>(
 		tag: T,
 		chain: AnyTag[]
 	): Promise<TagType<T>> {
@@ -134,7 +134,7 @@ export class ScopedContainer<TReg extends AnyTag> extends Container<TReg> {
 		const childDestroyPromises = this.children
 			.map((weakRef) => weakRef.deref())
 			.filter(
-				(child): child is ScopedContainer<TReg> => child !== undefined
+				(child): child is ScopedContainer<TTags> => child !== undefined
 			)
 			.map((child) => child.destroy());
 
@@ -169,7 +169,7 @@ export class ScopedContainer<TReg extends AnyTag> extends Container<TReg> {
 	 * Child containers inherit access to parent dependencies but maintain
 	 * their own scope for new registrations and instance caching.
 	 */
-	child(scope: Scope): ScopedContainer<TReg> {
+	child(scope: Scope): ScopedContainer<TTags> {
 		if (this.isDestroyed) {
 			throw new ContainerDestroyedError(
 				'Cannot create child containers from a destroyed container'

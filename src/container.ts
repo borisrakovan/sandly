@@ -20,7 +20,7 @@ import { Contravariant, PromiseOrValue } from './types.js';
  * (returning Promise<T>). The container handles both cases transparently.
  *
  * @template T - The type of the service instance being created
- * @template TReg - Union type of all dependencies available in the container
+ * @template TRequires - Union type of all required dependencies
  *
  * @example Synchronous factory
  * ```typescript
@@ -40,8 +40,8 @@ import { Contravariant, PromiseOrValue } from './types.js';
  * };
  * ```
  */
-export type Factory<T, TReg extends AnyTag> = (
-	ctx: ResolutionContext<TReg>
+export type Factory<T, TRequires extends AnyTag> = (
+	ctx: ResolutionContext<TRequires>
 ) => PromiseOrValue<T>;
 
 /**
@@ -98,7 +98,7 @@ export type Finalizer<T> = (instance: T) => PromiseOrValue<void>;
  * lifecycle logic or want to share lifecycle definitions across multiple services.
  *
  * @template T - The instance type
- * @template TReg - Union type of all dependencies available in the container
+ * @template TRequires - Union type of all required dependencies
  *
  * @example Using DependencyLifecycle as an object
  * ```typescript
@@ -176,8 +176,8 @@ export type Finalizer<T> = (instance: T) => PromiseOrValue<void>;
  * );
  * ```
  */
-export interface DependencyLifecycle<T, TReg extends AnyTag> {
-	create: Factory<T, TReg>;
+export interface DependencyLifecycle<T, TRequires extends AnyTag> {
+	create: Factory<T, TRequires>;
 	cleanup?: Finalizer<T>;
 }
 
@@ -189,7 +189,7 @@ export interface DependencyLifecycle<T, TReg extends AnyTag> {
  * - A complete lifecycle object with both factory and finalizer
  *
  * @template T - The dependency tag type
- * @template TReg - Union type of all dependencies available in the container
+ * @template TRequires - Union type of all required dependencies
  *
  * @example Simple factory registration
  * ```typescript
@@ -209,9 +209,9 @@ export interface DependencyLifecycle<T, TReg extends AnyTag> {
  * Container.empty().register(DatabaseConnection, spec);
  * ```
  */
-export type DependencySpec<T extends AnyTag, TReg extends AnyTag> =
-	| Factory<TagType<T>, TReg>
-	| DependencyLifecycle<TagType<T>, TReg>;
+export type DependencySpec<T extends AnyTag, TRequires extends AnyTag> =
+	| Factory<TagType<T>, TRequires>
+	| DependencyLifecycle<TagType<T>, TRequires>;
 
 /**
  * Type representing the context available to factory functions during dependency resolution.
@@ -219,10 +219,10 @@ export type DependencySpec<T extends AnyTag, TReg extends AnyTag> =
  * This type contains only the `resolve` and `resolveAll` methods from the container, which are used to retrieve
  * other dependencies during the creation of a service.
  *
- * @template TReg - Union type of all dependencies available in the container
+ * @template TTags - Union type of all dependencies available in the container
  */
-export type ResolutionContext<TReg extends AnyTag> = Pick<
-	IContainer<TReg>,
+export type ResolutionContext<TTags extends AnyTag> = Pick<
+	IContainer<TTags>,
 	'resolve' | 'resolveAll'
 >;
 
@@ -231,18 +231,18 @@ export type ResolutionContext<TReg extends AnyTag> = Pick<
  * for circular dependency detection.
  * @internal
  */
-class ResolutionContextImpl<TReg extends AnyTag>
-	implements ResolutionContext<TReg>
+class ResolutionContextImpl<TTags extends AnyTag>
+	implements ResolutionContext<TTags>
 {
 	constructor(
 		private readonly resolveFn: (tag: AnyTag) => Promise<unknown>
 	) {}
 
-	async resolve<T extends TReg>(tag: T): Promise<TagType<T>> {
+	async resolve<T extends TTags>(tag: T): Promise<TagType<T>> {
 		return this.resolveFn(tag) as Promise<TagType<T>>;
 	}
 
-	async resolveAll<const T extends readonly TReg[]>(
+	async resolveAll<const T extends readonly TTags[]>(
 		...tags: T
 	): Promise<{ [K in keyof T]: TagType<T[K]> }> {
 		const promises = tags.map((tag) => this.resolve(tag));
@@ -256,25 +256,25 @@ export const ContainerTypeId: unique symbol = Symbol.for('sandly/Container');
 /**
  * Interface representing a container that can register and retrieve dependencies.
  *
- * @template TReg - Union type of all dependencies available in the container
+ * @template TTags - Union type of all dependencies available in the container
  */
-export interface IContainer<TReg extends AnyTag = never> {
+export interface IContainer<TTags extends AnyTag = never> {
 	readonly [ContainerTypeId]: {
-		readonly _TReg: Contravariant<TReg>;
+		readonly _TTags: Contravariant<TTags>;
 	};
 
 	register: <T extends AnyTag>(
 		tag: T,
-		spec: DependencySpec<T, TReg>
-	) => IContainer<TReg | T>;
+		spec: DependencySpec<T, TTags>
+	) => IContainer<TTags | T>;
 
 	has(tag: AnyTag): boolean;
 
 	exists(tag: AnyTag): boolean;
 
-	resolve: <T extends TReg>(tag: T) => Promise<TagType<T>>;
+	resolve: <T extends TTags>(tag: T) => Promise<TagType<T>>;
 
-	resolveAll: <const T extends readonly TReg[]>(
+	resolveAll: <const T extends readonly TTags[]>(
 		...tags: T
 	) => Promise<{ [K in keyof T]: TagType<T[K]> }>;
 
@@ -290,6 +290,12 @@ export interface IContainer<TReg extends AnyTag = never> {
 export type AnyContainer = IContainer<AnyTag>;
 
 /**
+ * Extracts the registered tags (TTags) from a container type.
+ */
+export type ContainerTags<C> =
+	C extends IContainer<infer TTags> ? TTags : never;
+
+/**
  * A type-safe dependency injection container that manages service instantiation,
  * caching, and lifecycle management with support for async dependencies and
  * circular dependency detection.
@@ -298,7 +304,7 @@ export type AnyContainer = IContainer<AnyTag>;
  * at the type level, ensuring that only registered dependencies can be retrieved
  * and preventing runtime errors.
  *
- * @template TReg - Union type of all registered dependency tags in this container
+ * @template TTags - Union type of all registered dependency tags in this container
  *
  * @example Basic usage with service tags
  * ```typescript
@@ -356,9 +362,9 @@ export type AnyContainer = IContainer<AnyTag>;
  * await c.destroy(); // Calls all finalizers
  * ```
  */
-export class Container<TReg extends AnyTag> implements IContainer<TReg> {
+export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 	readonly [ContainerTypeId]!: {
-		readonly _TReg: Contravariant<TReg>;
+		readonly _TTags: Contravariant<TTags>;
 	};
 
 	// Make the constructor protected to prevent direct instantiation
@@ -377,7 +383,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 	 * Factory functions for creating dependency instances.
 	 * @internal
 	 */
-	protected readonly factories = new Map<AnyTag, Factory<unknown, TReg>>();
+	protected readonly factories = new Map<AnyTag, Factory<unknown, TTags>>();
 
 	/**
 	 * Finalizer functions for cleaning up dependencies when the container is destroyed.
@@ -484,8 +490,8 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 	 */
 	register<T extends AnyTag>(
 		tag: T,
-		spec: DependencySpec<T, TReg>
-	): Container<TReg | T> {
+		spec: DependencySpec<T, TTags>
+	): Container<TTags | T> {
 		if (this.isDestroyed) {
 			throw new ContainerDestroyedError(
 				'Cannot register dependencies on a destroyed container'
@@ -519,7 +525,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 			}
 		}
 
-		return this as Container<TReg | T>;
+		return this as Container<TTags | T>;
 	}
 
 	/**
@@ -601,7 +607,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 	 * const userService = await c.resolve(UserService);
 	 * ```
 	 */
-	async resolve<T extends TReg>(tag: T): Promise<TagType<T>> {
+	async resolve<T extends TTags>(tag: T): Promise<TagType<T>> {
 		return this.resolveInternal(tag, []);
 	}
 
@@ -610,7 +616,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 	 * Can be overridden by subclasses (e.g., ScopedContainer) to implement custom resolution logic.
 	 * @internal
 	 */
-	protected resolveInternal<T extends TReg>(
+	protected resolveInternal<T extends TTags>(
 		tag: T,
 		chain: AnyTag[]
 	): Promise<TagType<T>> {
@@ -633,7 +639,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 
 		// Get factory
 		const factory = this.factories.get(tag) as
-			| Factory<TagType<T>, TReg>
+			| Factory<TagType<T>, TTags>
 			| undefined;
 
 		if (factory === undefined) {
@@ -643,7 +649,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 		// Create resolution context with updated chain
 		const newChain = [...chain, tag];
 		const context = new ResolutionContextImpl((tag: AnyTag) =>
-			this.resolveInternal(tag as TReg, newChain)
+			this.resolveInternal(tag as TTags, newChain)
 		);
 
 		// Create and cache the promise
@@ -708,7 +714,7 @@ export class Container<TReg extends AnyTag> implements IContainer<TReg> {
 	 * const results = await c.resolveAll(); // Returns empty array
 	 * ```
 	 */
-	async resolveAll<const T extends readonly TReg[]>(
+	async resolveAll<const T extends readonly TTags[]>(
 		...tags: T
 	): Promise<{ [K in keyof T]: TagType<T[K]> }> {
 		if (this.isDestroyed) {
