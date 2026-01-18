@@ -1,4 +1,4 @@
-# lambdaverse
+# sandly
 
 ## 0.5.3
 
