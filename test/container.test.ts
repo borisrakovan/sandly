@@ -1210,8 +1210,8 @@ describe('DependencyContainer', () => {
 			expect(numberValue).toBe(42);
 		});
 
-		it('should work with anonymous ValueTags', async () => {
-			const ConfigTag = Tag.for<{ apiKey: string }>();
+		it('should work with ValueTags', async () => {
+			const ConfigTag = Tag.of('Config')<{ apiKey: string }>();
 
 			const container = Container.empty().register(ConfigTag, () => ({
 				apiKey: 'secret',

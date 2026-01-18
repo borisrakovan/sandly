@@ -223,46 +223,6 @@ export const Tag = {
 	},
 
 	/**
-	 * Creates an anonymous value tag with a unique symbol identifier.
-	 *
-	 * This is useful when you want a tag that's guaranteed to be unique but don't
-	 * need a human-readable identifier. Each call creates a new unique symbol,
-	 * making it impossible to accidentally create duplicate tags.
-	 *
-	 * @template T - The type that this tag represents
-	 * @returns A value tag with a unique symbol identifier
-	 *
-	 * @example
-	 * ```typescript
-	 * interface InternalConfig {
-	 *   secretKey: string;
-	 * }
-	 *
-	 * const InternalConfigTag = Tag.for<InternalConfig>();
-	 *
-	 * // This tag is guaranteed to be unique - no chance of conflicts
-	 * container.register(InternalConfigTag, () => ({
-	 *   secretKey: generateSecret()
-	 * }));
-	 * ```
-	 *
-	 * @example Multiple anonymous tags
-	 * ```typescript
-	 * const ConfigA = Tag.for<string>();
-	 * const ConfigB = Tag.for<string>();
-	 *
-	 * // These are different tags even though they have the same type
-	 * console.log(ConfigA === ConfigB); // false
-	 * ```
-	 */
-	for: <T>(): ValueTag<symbol, T> => {
-		return {
-			[ValueTagIdKey]: Symbol(),
-			[TagTypeKey]: undefined as T,
-		};
-	},
-
-	/**
 	 * Creates a base class that can be extended to create service classes with dependency tags.
 	 *
 	 * This is the primary way to define service classes in the dependency injection system.
@@ -337,11 +297,9 @@ export const Tag = {
 	 * @example
 	 * ```typescript
 	 * const StringTag = Tag.of('myString')<string>();
-	 * const SymbolTag = Tag.for<number>();
 	 * class ServiceClass extends Tag.Service('MyService') {}
 	 *
 	 * console.log(Tag.id(StringTag)); // "myString"
-	 * console.log(Tag.id(SymbolTag)); // "Symbol()"
 	 * console.log(Tag.id(ServiceClass)); // "MyService"
 	 * ```
 	 *

@@ -164,7 +164,7 @@ describe('DependencyContainer Type Safety', () => {
 		it('should work with mixed tag types in correct order', async () => {
 			class UserService extends Tag.Service('UserService') {}
 			const ApiKeyTag = Tag.of('apiKey')<string>();
-			const ConfigTag = Tag.for<{ port: number }>();
+			const ConfigTag = Tag.of('config')<{ port: number }>();
 
 			const container = Container.empty()
 				.register(UserService, () => new UserService())
@@ -277,12 +277,12 @@ describe('DependencyContainer Type Safety', () => {
 			>();
 		});
 
-		it('should work with anonymous value tags', () => {
+		it('should work with value tags', () => {
 			interface DatabaseConfig {
 				host: string;
 				port: number;
 			}
-			const DbConfigTag = Tag.for<DatabaseConfig>();
+			const DbConfigTag = Tag.of('DbConfig')<DatabaseConfig>();
 
 			const container = Container.empty().register(DbConfigTag, () => ({
 				host: 'localhost',
