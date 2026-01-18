@@ -1,0 +1,50 @@
+name: Publish (OIDC Trusted Publishing)
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  id-token: write # Required for OIDC
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Optional: uncomment to require manual approval before publishing
+    # environment: npm-publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint:check
+
+      - name: Type check
+        run: pnpm run type:check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm run build
+
+      # Do NOT set NODE_AUTH_TOKEN - npm will use OIDC automatically
+      # with id-token: write permission and Trusted Publishing configured
+      - name: Publish to npm
+        run: npm publish --access public
