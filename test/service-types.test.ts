@@ -1,4 +1,4 @@
-import { Container, IContainer, ResolutionContext } from '@/container.js';
+import { Container, ResolutionContext } from '@/container.js';
 import { Layer } from '@/layer.js';
 import { autoService, service } from '@/service.js';
 import { Tag } from '@/tag.js';
@@ -362,7 +362,7 @@ describe('Service Type Safety', () => {
 			const finalContainer = appService.register(container);
 
 			expectTypeOf(finalContainer).branded.toEqualTypeOf<
-				IContainer<typeof UserService>
+				Container<typeof UserService>
 			>();
 
 			// Should be able to resolve services from the container
@@ -608,7 +608,7 @@ describe('Service Type Safety', () => {
 
 			// Both services should be available in the final container
 			expectTypeOf(finalContainer).branded.toEqualTypeOf<
-				IContainer<typeof DatabaseService | typeof UserService>
+				Container<typeof DatabaseService | typeof UserService>
 			>();
 
 			// Should be able to resolve both services from the container
@@ -959,7 +959,7 @@ describe('Service Type Safety', () => {
 			const finalContainer = composed.register(container);
 
 			expectTypeOf(finalContainer).branded.toEqualTypeOf<
-				IContainer<typeof ServiceC>
+				Container<typeof ServiceC>
 			>();
 		});
 
@@ -998,7 +998,7 @@ describe('Service Type Safety', () => {
 			const finalContainer = composed.register(container);
 
 			expectTypeOf(finalContainer).branded.toEqualTypeOf<
-				IContainer<typeof ServiceC>
+				Container<typeof ServiceC>
 			>();
 		});
 	});

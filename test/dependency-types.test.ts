@@ -364,4 +364,104 @@ describe('dependency type inference', () => {
 			await container.resolve(OtherTag).catch(() => ({}));
 		});
 	});
+
+	describe('Static properties and private attributes handling', () => {
+		it('should handle services with static properties correctly', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+			class ServiceB extends Tag.Service('ServiceB') {
+				static readonly foo = 123; // Static property causes the bug
+
+				constructor(private a: ServiceA) {
+					super();
+				}
+			}
+			class ServiceC extends Tag.Service('ServiceC') {
+				constructor(private b: ServiceB) {
+					super();
+				}
+			}
+
+			const serviceA = dependency(ServiceA, () => new ServiceA());
+			const serviceB = dependency(
+				ServiceB,
+				async (ctx) => new ServiceB(await ctx.resolve(ServiceA)),
+				[ServiceA]
+			);
+			const serviceC = dependency(
+				ServiceC,
+				async (ctx) => new ServiceC(await ctx.resolve(ServiceB)),
+				[ServiceB]
+			);
+
+			// Composition chain:
+			// 1. serviceC requires ServiceB
+			// 2. provide(serviceB) satisfies ServiceB requirement
+			//    - serviceB requires ServiceA
+			//    - IF BUG EXISTS: serviceB also requires ServiceB (itself)
+			// 3. provide(serviceA) satisfies ServiceA requirement
+			//
+			// If bug exists: final layer still requires ServiceB
+			// If fix works: final layer requires nothing
+			const composed = serviceC.provide(serviceB).provide(serviceA);
+
+			expectTypeOf(composed).branded.toEqualTypeOf<
+				Layer<never, typeof ServiceC>
+			>();
+
+			// Should be able to register to empty container
+			const container = Container.empty();
+			const finalContainer = composed.register(container);
+
+			expectTypeOf(finalContainer).branded.toEqualTypeOf<
+				Container<typeof ServiceC>
+			>();
+		});
+
+		it('should handle services with private attributes correctly', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+			class ServiceB extends Tag.Service('ServiceB') {
+				private readonly client: string; // Private attribute causes the bug
+
+				constructor(
+					_config: object = {},
+					private a: ServiceA
+				) {
+					super();
+					this.client = 'test';
+				}
+			}
+			class ServiceC extends Tag.Service('ServiceC') {
+				constructor(private b: ServiceB) {
+					super();
+				}
+			}
+
+			const serviceA = dependency(ServiceA, () => new ServiceA());
+			const serviceB = dependency(
+				ServiceB,
+				async (ctx) => new ServiceB({}, await ctx.resolve(ServiceA)),
+				[ServiceA]
+			);
+			const serviceC = dependency(
+				ServiceC,
+				async (ctx) => new ServiceC(await ctx.resolve(ServiceB)),
+				[ServiceB]
+			);
+
+			// Same composition logic as above
+			const composed = serviceC.provide(serviceB).provide(serviceA);
+
+			expectTypeOf(composed).branded.toEqualTypeOf<
+				Layer<never, typeof ServiceC>
+			>();
+
+			// Should be able to register to empty container
+			const container = Container.empty();
+			const finalContainer = composed.register(container);
+
+			expectTypeOf(finalContainer).branded.toEqualTypeOf<
+				Container<typeof ServiceC>
+			>();
+		});
+	});
 });

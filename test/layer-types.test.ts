@@ -6,7 +6,7 @@ import { describe, expectTypeOf, it } from 'vitest';
 
 describe('Layer Type Safety', () => {
 	describe('layer register should preserve Container type', () => {
-		it('should return Container type, not just IContainer', () => {
+		it('should return Container type', () => {
 			class ServiceA extends Tag.Service('ServiceA') {}
 
 			const testLayer = layer<never, typeof ServiceA>((container) =>
@@ -15,7 +15,6 @@ describe('Layer Type Safety', () => {
 
 			const container = testLayer.register(Container.empty());
 
-			// This currently fails - we get IContainer instead of Container
 			expectTypeOf(container).toEqualTypeOf<Container<typeof ServiceA>>();
 		});
 
@@ -60,7 +59,6 @@ describe('Layer Type Safety', () => {
 			const mergedLayer = layerA.merge(layerB);
 			const container = mergedLayer.register(Container.empty());
 
-			// This currently fails - we get IContainer instead of Container
 			expectTypeOf(container).toEqualTypeOf<
 				Container<typeof ServiceA | typeof ServiceB>
 			>();
@@ -86,7 +84,6 @@ describe('Layer Type Safety', () => {
 			const mergedLayer = Layer.mergeAll(layerA, layerB, layerC);
 			const container = mergedLayer.register(Container.empty());
 
-			// This currently fails - we get IContainer instead of Container
 			expectTypeOf(container).toEqualTypeOf<
 				Container<typeof ServiceA | typeof ServiceB | typeof ServiceC>
 			>();
