@@ -7,6 +7,7 @@ export type {
 	IContainer,
 	ResolutionContext,
 } from './container.js';
+export { dependency } from './dependency.js';
 export {
 	CircularDependencyError,
 	ContainerDestroyedError,
