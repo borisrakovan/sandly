@@ -1,7 +1,6 @@
 export { constant } from './constant.js';
 export { Container } from './container.js';
 export type {
-	AnyContainer,
 	ContainerTags,
 	DependencyLifecycle,
 	DependencySpec,

@@ -282,14 +282,6 @@ export interface IContainer<TTags extends AnyTag = never> {
 }
 
 /**
- * Union type representing all valid container types.
- *
- * This type is useful for type constraints and function signatures that need to accept
- * any container type (Container or IContainer subtype).
- */
-export type AnyContainer = IContainer<AnyTag>;
-
-/**
  * Extracts the registered tags (TTags) from a container type.
  */
 export type ContainerTags<C> =

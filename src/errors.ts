@@ -1,20 +1,16 @@
 import { AnyTag, Tag } from './tag.js';
 
-export type ErrorProps = {
-	cause?: unknown;
-	detail?: Record<string, unknown>;
-};
-
 export type ErrorDump = {
 	name: string;
 	message: string;
 	stack?: string;
-	error: {
-		name: string;
-		message: string;
-		detail: Record<string, unknown>;
-		cause?: unknown;
-	};
+	detail: Record<string, unknown>;
+	cause?: unknown;
+};
+
+export type SandlyErrorOptions = {
+	cause?: unknown;
+	detail?: Record<string, unknown>;
 };
 
 /**
@@ -38,13 +34,13 @@ export type ErrorDump = {
 export class SandlyError extends Error {
 	detail: Record<string, unknown> | undefined;
 
-	constructor(message: string, { cause, detail }: ErrorProps = {}) {
+	constructor(message: string, { cause, detail }: SandlyErrorOptions = {}) {
 		super(message, { cause });
 		this.name = this.constructor.name;
 		this.detail = detail;
 		// Use cause stack if available, otherwise fall back to the current error's stack
 		if (cause instanceof Error && cause.stack !== undefined) {
-			this.stack = `${this.stack}\nCaused by: ${cause.stack}`;
+			this.stack = `${this.stack ?? ''}\nCaused by: ${cause.stack}`;
 		}
 	}
 
@@ -55,29 +51,43 @@ export class SandlyError extends Error {
 	}
 
 	dump(): ErrorDump {
-		// Only show the stack trace of the top-level error
-		const cause =
-			this.cause instanceof SandlyError
-				? this.cause.dump().error
-				: this.cause;
-
-		const result: ErrorDump['error'] = {
-			name: this.name,
-			message: this.message,
-			cause,
-			detail: this.detail ?? {},
-		};
-
 		return {
 			name: this.name,
-			message: result.message,
+			message: this.message,
 			stack: this.stack,
-			error: result,
+			detail: this.detail ?? {},
+			cause: this.dumpCause(this.cause),
 		};
 	}
 
 	dumps(): string {
 		return JSON.stringify(this.dump());
+	}
+
+	/**
+	 * Recursively extract cause chain from any Error.
+	 * Handles both AppError (with dump()) and plain Errors (with cause property).
+	 */
+	private dumpCause(cause: unknown): unknown {
+		if (cause instanceof SandlyError) {
+			return cause.dump();
+		}
+
+		if (cause instanceof Error) {
+			const result: Record<string, unknown> = {
+				name: cause.name,
+				message: cause.message,
+			};
+
+			// Recursively extract nested cause if present
+			if ('cause' in cause && cause.cause !== undefined) {
+				result.cause = this.dumpCause(cause.cause);
+			}
+
+			return result;
+		}
+
+		return cause;
 	}
 }
 
