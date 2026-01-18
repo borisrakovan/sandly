@@ -14,13 +14,13 @@ import type { TagId, TagType, ValueTag } from './tag.js';
  * const ApiKey = Tag.of('ApiKey')<string>();
  * const DatabaseUrl = Tag.of('DatabaseUrl')<string>();
  *
- * const apiKey = value(ApiKey, 'my-secret-key');
- * const dbUrl = value(DatabaseUrl, 'postgresql://localhost:5432/myapp');
+ * const apiKey = constant(ApiKey, 'my-secret-key');
+ * const dbUrl = constant(DatabaseUrl, 'postgresql://localhost:5432/myapp');
  *
  * const config = Layer.merge(apiKey, dbUrl);
  * ```
  */
-export function value<T extends ValueTag<TagId, unknown>>(
+export function constant<T extends ValueTag<TagId, unknown>>(
 	tag: T,
 	constantValue: TagType<T>
 ): Layer<never, T> {

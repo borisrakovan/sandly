@@ -2,7 +2,7 @@ import { Container } from '@/container.js';
 import { dependency } from '@/dependency.js';
 import { Layer } from '@/layer.js';
 import { Tag } from '@/tag.js';
-import { value } from '@/value.js';
+import { constant } from '@/constant.js';
 import { describe, expect, it } from 'vitest';
 
 describe('dependency', () => {
@@ -339,7 +339,7 @@ describe('dependency', () => {
 			});
 		});
 
-		it('should compose with value() layers', async () => {
+		it('should compose with constant() layers', async () => {
 			const ApiKey = Tag.of('ApiKey')<string>();
 
 			class ApiClient extends Tag.Service('ApiClient') {
@@ -351,7 +351,7 @@ describe('dependency', () => {
 				}
 			}
 
-			const apiKeyLayer = value(ApiKey, 'my-secret-key');
+			const apiKeyLayer = constant(ApiKey, 'my-secret-key');
 
 			const clientDep = dependency(
 				ApiClient,

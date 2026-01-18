@@ -22,6 +22,7 @@ export type { AnyLayer } from './layer.js';
 export { ScopedContainer } from './scoped-container.js';
 export type { Scope } from './scoped-container.js';
 export { autoService, service } from './service.js';
+export { constant } from './constant.js';
 export type { ServiceDependencies, ServiceDepsTuple } from './service.js';
 export {
 	InjectSource,
@@ -33,4 +34,3 @@ export {
 	type ValueTag,
 } from './tag.js';
 export type { PromiseOrValue } from './types.js';
-export { value } from './value.js';
