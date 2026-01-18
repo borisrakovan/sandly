@@ -1,9 +1,7 @@
 name: Publish (OIDC Trusted Publishing)
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,8 +10,6 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Optional: uncomment to require manual approval before publishing
-    # environment: npm-publish
 
     steps:
       - name: Checkout
@@ -45,6 +41,5 @@ jobs:
         run: pnpm run build
 
       # Do NOT set NODE_AUTH_TOKEN - npm will use OIDC automatically
-      # with id-token: write permission and Trusted Publishing configured
       - name: Publish to npm
         run: npm publish --access public
