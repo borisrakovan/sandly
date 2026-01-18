@@ -1,5 +1,11 @@
 # sandly
 
+## 1.0.1
+
+### Patch Changes
+
+- 9564b5e: Test OIDC publishing
+
 ## 1.0.0
 
 ### Major Changes
