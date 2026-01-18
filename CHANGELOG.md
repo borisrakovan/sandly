@@ -1,5 +1,11 @@
 # sandly
 
+## 1.0.0
+
+### Major Changes
+
+- aebc862: First stable release
+
 ## 0.5.3
 
 ### Patch Changes
