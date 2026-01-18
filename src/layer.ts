@@ -1,6 +1,32 @@
-import { IContainer } from './container.js';
+import { Container, IContainer } from './container.js';
+import { ScopedContainer } from './scoped-container.js';
 import { AnyTag } from './tag.js';
 import { Contravariant, Covariant } from './types.js';
+
+/**
+ * Extracts the registration type (TReg) from a container type.
+ * Works with both IContainer and Container.
+ * @internal
+ */
+export type ExtractContainerReg<C> =
+	C extends IContainer<infer TReg> ? TReg : never;
+
+/**
+ * Replaces the TReg type parameter in a container type with a new type.
+ * Preserves the concrete container type (Container, ScopedContainer, or IContainer).
+ *
+ * Uses contravariance to detect container types:
+ * - Any ScopedContainer<X> extends ScopedContainer<never>
+ * - Any Container<X> extends Container<never> (but not ScopedContainer<never>)
+ * - Falls back to IContainer for anything else
+ * @internal
+ */
+export type WithContainerReg<TContainer, TNewReg extends AnyTag> =
+	TContainer extends ScopedContainer<never>
+		? ScopedContainer<TNewReg>
+		: TContainer extends Container<never>
+			? Container<TNewReg>
+			: IContainer<TNewReg>;
 
 /**
  * The most generic layer type that accepts any concrete layer.
@@ -111,9 +137,12 @@ export interface Layer<
 	 * // Enhanced container has both ExistingService and myLayer's provisions
 	 * ```
 	 */
-	register: <TContainer extends AnyTag>(
-		container: IContainer<TRequires | TContainer>
-	) => IContainer<TRequires | TContainer | TProvides>;
+	register: <TContainer extends IContainer<TRequires>>(
+		container: TContainer
+	) => WithContainerReg<
+		TContainer,
+		ExtractContainerReg<TContainer> | TProvides
+	>;
 
 	/**
 	 * Provides a dependency layer to this layer, creating a pipeline where the dependency layer's
@@ -284,9 +313,13 @@ export function layer<
 	) => IContainer<TRequires | TContainer | TProvides>
 ): Layer<TRequires, TProvides> {
 	const layerImpl: Layer<TRequires, TProvides> = {
-		register: <TContainer extends AnyTag>(
-			container: IContainer<TRequires | TContainer>
-		) => register(container),
+		register: <TContainer extends IContainer<TRequires>>(
+			container: TContainer
+		) =>
+			register(container) as WithContainerReg<
+				TContainer,
+				ExtractContainerReg<TContainer> | TProvides
+			>,
 		provide(dependency) {
 			return createProvidedLayer(dependency, layerImpl);
 		},

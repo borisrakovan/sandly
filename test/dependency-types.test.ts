@@ -1,4 +1,4 @@
-import { Container, IContainer } from '@/container.js';
+import { Container } from '@/container.js';
 import { dependency } from '@/dependency.js';
 import { Layer } from '@/layer.js';
 import { Tag } from '@/tag.js';
@@ -278,7 +278,7 @@ describe('dependency type inference', () => {
 			// Should be able to register on empty container
 			const container = appLayer.register(Container.empty());
 			expectTypeOf(container).toExtend<
-				IContainer<typeof DatabaseService>
+				Container<typeof DatabaseService>
 			>();
 		});
 

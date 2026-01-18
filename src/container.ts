@@ -282,6 +282,14 @@ export interface IContainer<TReg extends AnyTag = never> {
 }
 
 /**
+ * Union type representing all valid container types.
+ *
+ * This type is useful for type constraints and function signatures that need to accept
+ * any container type (Container or IContainer subtype).
+ */
+export type AnyContainer = IContainer<AnyTag>;
+
+/**
  * A type-safe dependency injection container that manages service instantiation,
  * caching, and lifecycle management with support for async dependencies and
  * circular dependency detection.

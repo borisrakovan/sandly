@@ -1,9 +1,98 @@
 import { Container } from '@/container.js';
 import { Layer, layer } from '@/layer.js';
+import { ScopedContainer } from '@/scoped-container.js';
 import { Tag } from '@/tag.js';
 import { describe, expectTypeOf, it } from 'vitest';
 
 describe('Layer Type Safety', () => {
+	describe('layer register should preserve Container type', () => {
+		it('should return Container type, not just IContainer', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+
+			const testLayer = layer<never, typeof ServiceA>((container) =>
+				container.register(ServiceA, () => new ServiceA())
+			);
+
+			const container = testLayer.register(Container.empty());
+
+			// This currently fails - we get IContainer instead of Container
+			expectTypeOf(container).toEqualTypeOf<Container<typeof ServiceA>>();
+		});
+
+		it('should preserve Container type through provide composition', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+			class ServiceB extends Tag.Service('ServiceB') {}
+
+			const layerA = layer<never, typeof ServiceA>((container) =>
+				container.register(ServiceA, () => new ServiceA())
+			);
+
+			const layerB = layer<typeof ServiceA, typeof ServiceB>(
+				(container) =>
+					container.register(
+						ServiceB,
+						async (ctx) => new ServiceB(await ctx.resolve(ServiceA))
+					)
+			);
+
+			const composedLayer = layerB.provide(layerA);
+			const container = composedLayer.register(
+				ScopedContainer.empty('test')
+			);
+
+			expectTypeOf(container).toEqualTypeOf<
+				ScopedContainer<typeof ServiceB>
+			>();
+		});
+
+		it('should preserve Container type through merge composition', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+			class ServiceB extends Tag.Service('ServiceB') {}
+
+			const layerA = layer<never, typeof ServiceA>((container) =>
+				container.register(ServiceA, () => new ServiceA())
+			);
+
+			const layerB = layer<never, typeof ServiceB>((container) =>
+				container.register(ServiceB, () => new ServiceB())
+			);
+
+			const mergedLayer = layerA.merge(layerB);
+			const container = mergedLayer.register(Container.empty());
+
+			// This currently fails - we get IContainer instead of Container
+			expectTypeOf(container).toEqualTypeOf<
+				Container<typeof ServiceA | typeof ServiceB>
+			>();
+		});
+
+		it('should preserve Container type through Layer.mergeAll', () => {
+			class ServiceA extends Tag.Service('ServiceA') {}
+			class ServiceB extends Tag.Service('ServiceB') {}
+			class ServiceC extends Tag.Service('ServiceC') {}
+
+			const layerA = layer<never, typeof ServiceA>((container) =>
+				container.register(ServiceA, () => new ServiceA())
+			);
+
+			const layerB = layer<never, typeof ServiceB>((container) =>
+				container.register(ServiceB, () => new ServiceB())
+			);
+
+			const layerC = layer<never, typeof ServiceC>((container) =>
+				container.register(ServiceC, () => new ServiceC())
+			);
+
+			const mergedLayer = Layer.mergeAll(layerA, layerB, layerC);
+			const container = mergedLayer.register(Container.empty());
+
+			// This currently fails - we get IContainer instead of Container
+			expectTypeOf(container).toEqualTypeOf<
+				Container<typeof ServiceA | typeof ServiceB | typeof ServiceC>
+			>();
+		});
+	});
+
 	describe('basic layer types', () => {
 		it('should create layer with correct requirement and provision types', () => {
 			class ServiceA extends Tag.Service('ServiceA') {}
