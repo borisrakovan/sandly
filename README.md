@@ -204,12 +204,12 @@ const container = Container.empty()
 For large applications, organizing dependencies into layers helps manage complexity and makes dependencies composable.
 
 ```typescript
-import { layer, service, value, Tag, Container } from 'sandly';
+import { layer, service, constant, Tag, Container } from 'sandly';
 
 // Configuration layer - provides primitive values
 const Config = Tag.of('Config')<{ databaseUrl: string }>();
 
-const configLayer = value(Config, { databaseUrl: process.env.DATABASE_URL! });
+const configLayer = constant(Config, { databaseUrl: process.env.DATABASE_URL! });
 
 // Database layer - depends on config
 class Database extends Tag.Service('Database') {
@@ -265,7 +265,7 @@ Don't worry if you don't understand everything yet - keep reading and you'll lea
 Any value can be a dependency, not just class instances:
 
 ```typescript
-import { Tag, value, Container } from 'sandly';
+import { Tag, constant, Container } from 'sandly';
 
 // Primitive values
 const PortTag = Tag.of('Port')<number>();
@@ -1319,7 +1319,7 @@ export const databaseLayer = autoService(Database, [ConfigTag]);
 export const loggerLayer = autoService(Logger, []);
 
 // config.ts
-export const configLayer = value(ConfigTag, loadConfig());
+export const configLayer = constant(ConfigTag, loadConfig());
 
 // Infrastructure layer combining all base services
 export const infraLayer = Layer.mergeAll(
@@ -1629,24 +1629,75 @@ const databaseLayer = autoService(Database, {
 });
 ```
 
-#### value() - Value Layer Helper
+#### dependency() - Generic Dependency Layer
 
-The `value()` function creates a layer that provides a constant value:
+The `dependency()` function creates a layer for any tag type (ServiceTag or ValueTag) with fully inferred types. Unlike `service()` and `autoService()`, it doesn't require extending `Tag.Service()`:
 
 ```typescript
-import { value, Tag } from 'sandly';
+import { dependency, Tag } from 'sandly';
+
+// Simple dependency without requirements
+const Config = Tag.of('Config')<{ apiUrl: string }>();
+
+const configDep = dependency(Config, () => ({
+	apiUrl: process.env.API_URL!,
+}));
+
+// Dependency with requirements - pass them as the last argument
+const Database = Tag.of('Database')<DatabaseConnection>();
+
+const databaseDep = dependency(
+	Database,
+	async (ctx) => {
+		const config = await ctx.resolve(Config);
+		return createConnection(config.apiUrl);
+	},
+	[Config] // Requirements array - enables type inference
+);
+```
+
+With lifecycle (create + cleanup):
+
+```typescript
+const databaseDep = dependency(
+	Database,
+	{
+		create: async (ctx) => {
+			const config = await ctx.resolve(Config);
+			return await createConnection(config.apiUrl);
+		},
+		cleanup: async (db) => {
+			await db.disconnect();
+		},
+	},
+	[Config]
+);
+```
+
+The `dependency()` function is useful when:
+
+- Working with ValueTags that need dependencies
+- Using third-party classes that can't extend `Tag.Service()`
+- Wanting cleaner syntax than `layer()` without explicit type parameters
+
+#### constant() - Constant Value Layer Helper
+
+The `constant()` function creates a layer that provides a constant value:
+
+```typescript
+import { constant, Tag } from 'sandly';
 
 const ApiKeyTag = Tag.of('ApiKey')<string>();
 const PortTag = Tag.of('Port')<number>();
 
-const apiKeyLayer = value(ApiKeyTag, 'my-secret-key');
-const portLayer = value(PortTag, 3000);
+const apiKeyLayer = constant(ApiKeyTag, 'my-secret-key');
+const portLayer = constant(PortTag, 3000);
 
-// Combine value layers
+// Combine constant layers
 const configLayer = Layer.mergeAll(
 	apiKeyLayer,
 	portLayer,
-	value(Tag.of('Debug')<boolean>(), true)
+	constant(Tag.of('Debug')<boolean>(), true)
 );
 ```
 
@@ -1751,7 +1802,7 @@ Use when you want to expose multiple layers' services:
 ```typescript
 const AppConfigTag = Tag.of('AppConfig')<AppConfig>();
 
-const configLayer = value(AppConfigTag, loadConfig());
+const configLayer = constant(AppConfigTag, loadConfig());
 const databaseLayer = layer<typeof AppConfigTag, typeof Database>((container) =>
 	container.register(
 		Database,
@@ -1826,8 +1877,8 @@ Merges multiple layers at once:
 
 ```typescript
 const infraLayer = Layer.mergeAll(
-	value(ApiKeyTag, 'key'),
-	value(PortTag, 3000),
+	constant(ApiKeyTag, 'key'),
+	constant(PortTag, 3000),
 	databaseLayer,
 	loggerLayer
 );
