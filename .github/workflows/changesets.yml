@@ -38,4 +38,5 @@ jobs:
           # The tag push will trigger the publish workflow
           publish: pnpm run tag
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Use PAT instead of GITHUB_TOKEN so the PR triggers CI workflows
+          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN }}
