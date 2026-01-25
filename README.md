@@ -1,6 +1,6 @@
 # Sandly
 
-Type-safe dependency injection for TypeScript. No decorators, no runtime reflection, just compile-time safety that catches errors before your code runs.
+Sandly ("Services And Layers") is a type-safe dependency injection library for TypeScript. No decorators, no runtime reflection, just compile-time safety that catches errors before your code runs.
 
 ## Why Sandly?
 
@@ -10,12 +10,16 @@ Most TypeScript DI libraries rely on experimental decorators and runtime reflect
 import { Container, Layer } from 'sandly';
 
 class Database {
-  query(sql: string) { return []; }
+	query(sql: string) {
+		return [];
+	}
 }
 
 class UserService {
-  constructor(private db: Database) {}
-  getUsers() { return this.db.query('SELECT * FROM users'); }
+	constructor(private db: Database) {}
+	getUsers() {
+		return this.db.query('SELECT * FROM users');
+	}
 }
 
 // Define layers
@@ -60,24 +64,24 @@ import { Container, Layer, Tag } from 'sandly';
 
 // Any class can be a dependency - no special base class needed
 class Database {
-  async query(sql: string) {
-    return [{ id: 1, name: 'Alice' }];
-  }
-  async close() {
-    console.log('Database closed');
-  }
+	async query(sql: string) {
+		return [{ id: 1, name: 'Alice' }];
+	}
+	async close() {
+		console.log('Database closed');
+	}
 }
 
 class UserRepository {
-  constructor(private db: Database) {}
-  findAll() {
-    return this.db.query('SELECT * FROM users');
-  }
+	constructor(private db: Database) {}
+	findAll() {
+		return this.db.query('SELECT * FROM users');
+	}
 }
 
 // Create layers
 const dbLayer = Layer.service(Database, [], {
-  cleanup: (db) => db.close()
+	cleanup: (db) => db.close(),
 });
 
 const userRepoLayer = Layer.service(UserRepository, [Database]);
@@ -104,7 +108,9 @@ Tags identify dependencies. There are two types:
 
 ```typescript
 class UserService {
-  getUsers() { return []; }
+	getUsers() {
+		return [];
+	}
 }
 
 // UserService is both the class and its tag
@@ -118,7 +124,9 @@ const PortTag = Tag.of('Port')<number>();
 const ConfigTag = Tag.of('Config')<{ apiUrl: string }>();
 
 const portLayer = Layer.value(PortTag, 3000);
-const configLayer = Layer.value(ConfigTag, { apiUrl: 'https://api.example.com' });
+const configLayer = Layer.value(ConfigTag, {
+	apiUrl: 'https://api.example.com',
+});
 ```
 
 ### Container
@@ -131,19 +139,20 @@ const container = Container.from(appLayer);
 
 // Or build manually
 const container = Container.builder()
-  .add(Database, () => new Database())
-  .add(UserService, async (ctx) => 
-    new UserService(await ctx.resolve(Database))
-  )
-  .build();
+	.add(Database, () => new Database())
+	.add(
+		UserService,
+		async (ctx) => new UserService(await ctx.resolve(Database))
+	)
+	.build();
 
 // Resolve dependencies
 const db = await container.resolve(Database);
 const [db, users] = await container.resolveAll(Database, UserService);
 
 // Use and discard pattern - resolves, runs callback, then destroys
-const result = await container.use(UserService, (service) => 
-  service.getUsers()
+const result = await container.use(UserService, (service) =>
+	service.getUsers()
 );
 
 // Manual clean up
@@ -165,11 +174,12 @@ const configLayer = Layer.value(ConfigTag, { port: 3000 });
 
 // Layer.create for custom factory logic
 const cacheLayer = Layer.create({
-  requires: [ConfigTag],
-  apply: (builder) => builder.add(Cache, async (ctx) => {
-    const config = await ctx.resolve(ConfigTag);
-    return new Cache({ ttl: config.cacheTtl });
-  })
+	requires: [ConfigTag],
+	apply: (builder) =>
+		builder.add(Cache, async (ctx) => {
+			const config = await ctx.resolve(ConfigTag);
+			return new Cache({ ttl: config.cacheTtl });
+		}),
 });
 ```
 
@@ -195,16 +205,17 @@ Scoped containers enable hierarchical dependency management:
 ```typescript
 // Application scope - use builder to add dependencies
 const appContainer = ScopedContainer.builder('app')
-  .add(Database, () => new Database())
-  .build();
+	.add(Database, () => new Database())
+	.build();
 
 // Request scope - use child() to create a child builder
-const requestContainer = appContainer.child('request')
-  .add(RequestContext, () => new RequestContext())
-  .build();
+const requestContainer = appContainer
+	.child('request')
+	.add(RequestContext, () => new RequestContext())
+	.build();
 
 // Child can resolve both its own and parent dependencies
-const db = await requestContainer.resolve(Database);      // From parent
+const db = await requestContainer.resolve(Database); // From parent
 const ctx = await requestContainer.resolve(RequestContext); // From child
 
 // Destroy child without affecting parent
@@ -215,8 +226,9 @@ Or use layers with `childFrom`:
 
 ```typescript
 const appContainer = ScopedContainer.from('app', dbLayer);
-const requestContainer = appContainer.childFrom('request',
-  Layer.value(RequestContext, new RequestContext())
+const requestContainer = appContainer.childFrom(
+	'request',
+	Layer.value(RequestContext, new RequestContext())
 );
 ```
 
@@ -227,8 +239,8 @@ The `use()` method resolves a service, runs a callback, and automatically destro
 ```typescript
 // Perfect for short-lived operations like Lambda handlers or worker jobs
 const result = await appContainer
-  .childFrom('request', requestLayer)
-  .use(UserService, (service) => service.processEvent(event));
+	.childFrom('request', requestLayer)
+	.use(UserService, (service) => service.processEvent(event));
 // Container is automatically destroyed after callback completes
 ```
 
@@ -242,7 +254,10 @@ This is especially useful for serverless functions or message handlers where the
 
 ```typescript
 class ApiClient {
-  constructor(private config: Config, private logger: Logger) {}
+	constructor(
+		private config: Config,
+		private logger: Logger
+	) {}
 }
 
 // Dependencies must match constructor parameters in order
@@ -250,7 +265,7 @@ const apiLayer = Layer.service(ApiClient, [Config, Logger]);
 
 // With cleanup function
 const dbLayer = Layer.service(Database, [], {
-  cleanup: (db) => db.close()
+	cleanup: (db) => db.close(),
 });
 ```
 
@@ -265,13 +280,14 @@ const configLayer = Layer.value(ApiKeyTag, process.env.API_KEY!);
 
 ```typescript
 const dbLayer = Layer.create({
-  requires: [ConfigTag],
-  apply: (builder) => builder.add(Database, async (ctx) => {
-    const config = await ctx.resolve(ConfigTag);
-    const db = new Database(config.dbUrl);
-    await db.connect();
-    return db;
-  })
+	requires: [ConfigTag],
+	apply: (builder) =>
+		builder.add(Database, async (ctx) => {
+			const config = await ctx.resolve(ConfigTag);
+			const db = new Database(config.dbUrl);
+			await db.connect();
+			return db;
+		}),
 });
 ```
 
@@ -286,10 +302,10 @@ const serviceLayer = Layer.service(UserService, [UserRepository, Logger]);
 
 // Compose into complete application
 const appLayer = serviceLayer
-  .provide(repoLayer)
-  .provide(dbLayer)
-  .provide(configLayer)
-  .provide(Layer.service(Logger, []));
+	.provide(repoLayer)
+	.provide(dbLayer)
+	.provide(configLayer)
+	.provide(Layer.service(Logger, []));
 
 // Create container - all dependencies satisfied
 const container = Container.from(appLayer);
@@ -324,48 +340,55 @@ const container = Container.from(incomplete); // Type error!
 import { ScopedContainer, Layer } from 'sandly';
 
 // App-level dependencies (shared across requests)
-const appContainer = ScopedContainer.from('app', 
-  Layer.mergeAll(dbLayer, loggerLayer)
+const appContainer = ScopedContainer.from(
+	'app',
+	Layer.mergeAll(dbLayer, loggerLayer)
 );
 
 // Express middleware
 app.use(async (req, res, next) => {
-  // Create request scope with request-specific dependencies
-  const requestScope = appContainer.childFrom('request',
-    Layer.value(RequestContext, { 
-      requestId: crypto.randomUUID(),
-      userId: req.user?.id 
-    })
-  );
-  
-  res.locals.container = requestScope;
-  
-  res.on('finish', () => requestScope.destroy());
-  next();
+	// Create request scope with request-specific dependencies
+	const requestScope = appContainer.childFrom(
+		'request',
+		Layer.value(RequestContext, {
+			requestId: crypto.randomUUID(),
+			userId: req.user?.id,
+		})
+	);
+
+	res.locals.container = requestScope;
+
+	res.on('finish', () => requestScope.destroy());
+	next();
 });
 
 // Route handler
 app.get('/users', async (req, res) => {
-  const userService = await res.locals.container.resolve(UserService);
-  res.json(await userService.getUsers());
+	const userService = await res.locals.container.resolve(UserService);
+	res.json(await userService.getUsers());
 });
 ```
 
 ### Destruction Order
 
 When destroying a scoped container:
+
 1. Child scopes are destroyed first
 2. Then the current scope's finalizers run
 3. Parent scope is unaffected
 
 ```typescript
 const parent = ScopedContainer.builder('parent')
-  .add(Database, { create: () => new Database(), cleanup: (db) => db.close() })
-  .build();
+	.add(Database, {
+		create: () => new Database(),
+		cleanup: (db) => db.close(),
+	})
+	.build();
 
-const child = parent.child('child')
-  .add(Cache, { create: () => new Cache(), cleanup: (c) => c.clear() })
-  .build();
+const child = parent
+	.child('child')
+	.add(Cache, { create: () => new Cache(), cleanup: (c) => c.clear() })
+	.build();
 
 await parent.destroy(); // Destroys child first (Cache.clear), then parent (Database.close)
 ```
@@ -376,25 +399,25 @@ Sandly provides specific error types for common issues:
 
 ```typescript
 import {
-  UnknownDependencyError,
-  CircularDependencyError,
-  DependencyCreationError,
-  DependencyFinalizationError
+	UnknownDependencyError,
+	CircularDependencyError,
+	DependencyCreationError,
+	DependencyFinalizationError,
 } from 'sandly';
 
 try {
-  const service = await container.resolve(UserService);
+	const service = await container.resolve(UserService);
 } catch (error) {
-  if (error instanceof CircularDependencyError) {
-    console.log(error.message);
-    // "Circular dependency detected for UserService: UserService -> Database -> UserService"
-  }
-  
-  if (error instanceof DependencyCreationError) {
-    // Get the original error that caused the failure
-    const rootCause = error.getRootCause();
-    console.log(rootCause.message);
-  }
+	if (error instanceof CircularDependencyError) {
+		console.log(error.message);
+		// "Circular dependency detected for UserService: UserService -> Database -> UserService"
+	}
+
+	if (error instanceof DependencyCreationError) {
+		// Get the original error that caused the failure
+		const rootCause = error.getRootCause();
+		console.log(rootCause.message);
+	}
 }
 ```
 
@@ -402,68 +425,69 @@ try {
 
 ### Container
 
-| Method | Description |
-|--------|-------------|
-| `Container.from(layer)` | Create container from a fully resolved layer |
-| `Container.builder()` | Create a container builder |
-| `Container.empty()` | Create an empty container |
-| `Container.scoped(scope)` | Create an empty scoped container |
-| `container.resolve(tag)` | Get a dependency instance |
-| `container.resolveAll(...tags)` | Get multiple dependencies |
-| `container.use(tag, fn)` | Resolve, run callback, then destroy container |
-| `container.destroy()` | Run finalizers and clean up |
+| Method                          | Description                                   |
+| ------------------------------- | --------------------------------------------- |
+| `Container.from(layer)`         | Create container from a fully resolved layer  |
+| `Container.builder()`           | Create a container builder                    |
+| `Container.empty()`             | Create an empty container                     |
+| `Container.scoped(scope)`       | Create an empty scoped container              |
+| `container.resolve(tag)`        | Get a dependency instance                     |
+| `container.resolveAll(...tags)` | Get multiple dependencies                     |
+| `container.use(tag, fn)`        | Resolve, run callback, then destroy container |
+| `container.destroy()`           | Run finalizers and clean up                   |
 
 ### ContainerBuilder
 
-| Method | Description |
-|--------|-------------|
+| Method                   | Description           |
+| ------------------------ | --------------------- |
 | `builder.add(tag, spec)` | Register a dependency |
-| `builder.build()` | Create the container |
+| `builder.build()`        | Create the container  |
 
 ### Layer
 
-| Method | Description |
-|--------|-------------|
-| `Layer.service(class, deps, options?)` | Create layer for a class |
-| `Layer.value(tag, value)` | Create layer for a constant value |
-| `Layer.create({ requires, apply })` | Create custom layer |
-| `Layer.empty()` | Create empty layer |
-| `Layer.merge(a, b)` | Merge two layers |
-| `Layer.mergeAll(...layers)` | Merge multiple layers |
-| `layer.provide(dep)` | Satisfy dependencies |
-| `layer.provideMerge(dep)` | Satisfy and merge provisions |
-| `layer.merge(other)` | Merge with another layer |
+| Method                                 | Description                       |
+| -------------------------------------- | --------------------------------- |
+| `Layer.service(class, deps, options?)` | Create layer for a class          |
+| `Layer.value(tag, value)`              | Create layer for a constant value |
+| `Layer.create({ requires, apply })`    | Create custom layer               |
+| `Layer.empty()`                        | Create empty layer                |
+| `Layer.merge(a, b)`                    | Merge two layers                  |
+| `Layer.mergeAll(...layers)`            | Merge multiple layers             |
+| `layer.provide(dep)`                   | Satisfy dependencies              |
+| `layer.provideMerge(dep)`              | Satisfy and merge provisions      |
+| `layer.merge(other)`                   | Merge with another layer          |
 
 ### ScopedContainer
 
-| Method | Description |
-|--------|-------------|
-| `ScopedContainer.builder(scope)` | Create a new scoped container builder |
-| `ScopedContainer.empty(scope)` | Create empty scoped container |
-| `ScopedContainer.from(scope, layer)` | Create from layer |
-| `container.child(scope)` | Create child scope builder |
-| `container.childFrom(scope, layer)` | Create child scope from layer (convenience) |
+| Method                               | Description                                 |
+| ------------------------------------ | ------------------------------------------- |
+| `ScopedContainer.builder(scope)`     | Create a new scoped container builder       |
+| `ScopedContainer.empty(scope)`       | Create empty scoped container               |
+| `ScopedContainer.from(scope, layer)` | Create from layer                           |
+| `container.child(scope)`             | Create child scope builder                  |
+| `container.childFrom(scope, layer)`  | Create child scope from layer (convenience) |
 
 ### Tag
 
-| Method | Description |
-|--------|-------------|
-| `Tag.of(id)<T>()` | Create a ValueTag |
-| `Tag.id(tag)` | Get tag's string identifier |
-| `Tag.isTag(value)` | Check if value is a tag |
+| Method             | Description                 |
+| ------------------ | --------------------------- |
+| `Tag.of(id)<T>()`  | Create a ValueTag           |
+| `Tag.id(tag)`      | Get tag's string identifier |
+| `Tag.isTag(value)` | Check if value is a tag     |
 
 ## Comparison with Alternatives
 
-| Feature | Sandly | NestJS | InversifyJS | TSyringe |
-|---------|--------|--------|-------------|----------|
-| Compile-time type safety | ✅ | ❌ | ⚠️ Partial | ❌ |
-| No experimental decorators | ✅ | ❌ | ❌ | ❌ |
-| Async factories | ✅ | ✅ | ❌ | ❌ |
-| Framework-agnostic | ✅ | ❌ | ✅ | ✅ |
-| Layer composition | ✅ | ❌ | ❌ | ❌ |
-| Zero dependencies | ✅ | ❌ | ❌ | ❌ |
+| Feature                    | Sandly | NestJS | InversifyJS | TSyringe |
+| -------------------------- | ------ | ------ | ----------- | -------- |
+| Compile-time type safety   | ✅     | ❌     | ⚠️ Partial  | ❌       |
+| No experimental decorators | ✅     | ❌     | ❌          | ❌       |
+| Async factories            | ✅     | ✅     | ❌          | ❌       |
+| Framework-agnostic         | ✅     | ❌     | ✅          | ✅       |
+| Layer composition          | ✅     | ❌     | ❌          | ❌       |
+| Zero dependencies          | ✅     | ❌     | ❌          | ❌       |
 
 **Choose Sandly when you want:**
+
 - Type safety without sacrificing simplicity
 - DI without experimental decorators
 - Composable, reusable dependency modules
