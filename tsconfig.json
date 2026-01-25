@@ -25,18 +25,10 @@
 		"strictPropertyInitialization": true,
 		// Set the base directory for resolving non-relative module names
 		"baseUrl": ".",
-		// Set alias paths for imports
-		"paths": {
-			"@/*": ["src/*"],
-			"@test/*": ["test/*"]
-		}
 	},
 	"include": [
 		"src/**/*",
-		"test/**/*",
-		"examples/**/*",
 		"vitest.config.ts",
-		"playground/**/*",
 		"tsdown.config.ts"
 	],
 	"exclude": [

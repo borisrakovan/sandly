@@ -31,9 +31,10 @@ export default tseslint.config(
 		},
 	},
 	{
-		files: ['test/**'],
+		files: ['test/**', '**/*.test.ts'],
 		rules: {
 			'@typescript-eslint/unbound-method': 'off',
+			'@typescript-eslint/no-extraneous-class': 'off',
 		},
 	},
 	{

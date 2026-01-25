@@ -1,5 +1,8 @@
 import { AnyTag, Tag } from './tag.js';
 
+/**
+ * Structured error information for debugging and logging.
+ */
 export type ErrorDump = {
 	name: string;
 	message: string;
@@ -8,18 +11,21 @@ export type ErrorDump = {
 	cause?: unknown;
 };
 
+/**
+ * Options for creating Sandly errors.
+ */
 export type SandlyErrorOptions = {
 	cause?: unknown;
 	detail?: Record<string, unknown>;
 };
 
 /**
- * Base error class for all library errors.
+ * Base error class for all Sandly library errors.
  *
- * This extends the native Error class to provide consistent error handling
+ * Extends the native Error class to provide consistent error handling
  * and structured error information across the library.
  *
- * @example Catching library errors
+ * @example
  * ```typescript
  * try {
  *   await container.resolve(SomeService);
@@ -38,18 +44,24 @@ export class SandlyError extends Error {
 		super(message, { cause });
 		this.name = this.constructor.name;
 		this.detail = detail;
-		// Use cause stack if available, otherwise fall back to the current error's stack
+		// Use cause stack if available
 		if (cause instanceof Error && cause.stack !== undefined) {
 			this.stack = `${this.stack ?? ''}\nCaused by: ${cause.stack}`;
 		}
 	}
 
+	/**
+	 * Wraps any error as a SandlyError.
+	 */
 	static ensure(error: unknown): SandlyError {
 		return error instanceof SandlyError
 			? error
 			: new SandlyError('An unknown error occurred', { cause: error });
 	}
 
+	/**
+	 * Returns a structured representation of the error for logging.
+	 */
 	dump(): ErrorDump {
 		return {
 			name: this.name,
@@ -60,13 +72,15 @@ export class SandlyError extends Error {
 		};
 	}
 
+	/**
+	 * Returns a JSON string representation of the error.
+	 */
 	dumps(): string {
 		return JSON.stringify(this.dump());
 	}
 
 	/**
 	 * Recursively extract cause chain from any Error.
-	 * Handles both AppError (with dump()) and plain Errors (with cause property).
 	 */
 	private dumpCause(cause: unknown): unknown {
 		if (cause instanceof SandlyError) {
@@ -79,7 +93,6 @@ export class SandlyError extends Error {
 				message: cause.message,
 			};
 
-			// Recursively extract nested cause if present
 			if ('cause' in cause && cause.cause !== undefined) {
 				result.cause = this.dumpCause(cause.cause);
 			}
@@ -92,36 +105,19 @@ export class SandlyError extends Error {
 }
 
 /**
- * Error thrown when attempting to register a dependency that has already been instantiated.
- *
- * This error occurs when calling `container.register()` for a tag that has already been instantiated.
- * Registration must happen before any instantiation occurs, as cached instances would still be used
- * by existing dependencies.
- */
-export class DependencyAlreadyInstantiatedError extends SandlyError {}
-
-/**
  * Error thrown when attempting to use a container that has been destroyed.
- *
- * This error occurs when calling `container.resolve()`, `container.register()`, or `container.destroy()`
- * on a container that has already been destroyed. It indicates a programming error where the container
- * is being used after it has been destroyed.
  */
 export class ContainerDestroyedError extends SandlyError {}
 
 /**
  * Error thrown when attempting to retrieve a dependency that hasn't been registered.
  *
- * This error occurs when calling `container.resolve(Tag)` for a tag that was never
- * registered via `container.register()`. It indicates a programming error where
- * the dependency setup is incomplete.
- *
  * @example
  * ```typescript
- * const container = Container.empty(); // Empty container
+ * const container = Container.builder().build(); // Empty container
  *
  * try {
- *   await c.resolve(UnregisteredService); // This will throw
+ *   await container.resolve(UnregisteredService);
  * } catch (error) {
  *   if (error instanceof UnknownDependencyError) {
  *     console.error('Missing dependency:', error.message);
@@ -130,59 +126,32 @@ export class ContainerDestroyedError extends SandlyError {}
  * ```
  */
 export class UnknownDependencyError extends SandlyError {
-	/**
-	 * @internal
-	 * Creates an UnknownDependencyError for the given tag.
-	 *
-	 * @param tag - The dependency tag that wasn't found
-	 */
 	constructor(tag: AnyTag) {
-		super(`No factory registered for dependency ${String(Tag.id(tag))}`);
+		super(`No factory registered for dependency "${Tag.id(tag)}"`);
 	}
 }
 
 /**
- * Error thrown when a circular dependency is detected during dependency resolution.
+ * Error thrown when a circular dependency is detected during resolution.
  *
- * This occurs when service A depends on service B, which depends on service A (directly
- * or through a chain of dependencies). The error includes the full dependency chain
- * to help identify the circular reference.
- *
- * @example Circular dependency scenario
+ * @example
  * ```typescript
- * class ServiceA extends Tag.Service('ServiceA') {}
- * class ServiceB extends Tag.Service('ServiceB') {}
- *
- * const container = Container.empty()
- *   .register(ServiceA, async (ctx) =>
- *     new ServiceA(await ctx.resolve(ServiceB)) // Depends on B
- *   )
- *   .register(ServiceB, async (ctx) =>
- *     new ServiceB(await ctx.resolve(ServiceA)) // Depends on A - CIRCULAR!
- *   );
- *
+ * // ServiceA depends on ServiceB, ServiceB depends on ServiceA
  * try {
- *   await c.resolve(ServiceA);
+ *   await container.resolve(ServiceA);
  * } catch (error) {
  *   if (error instanceof CircularDependencyError) {
  *     console.error('Circular dependency:', error.message);
- *     // Output: "Circular dependency detected for ServiceA: ServiceA -> ServiceB -> ServiceA"
+ *     // "Circular dependency detected for ServiceA: ServiceA -> ServiceB -> ServiceA"
  *   }
  * }
  * ```
  */
 export class CircularDependencyError extends SandlyError {
-	/**
-	 * @internal
-	 * Creates a CircularDependencyError with the dependency chain information.
-	 *
-	 * @param tag - The tag where the circular dependency was detected
-	 * @param dependencyChain - The chain of dependencies that led to the circular reference
-	 */
 	constructor(tag: AnyTag, dependencyChain: AnyTag[]) {
 		const chain = dependencyChain.map((t) => Tag.id(t)).join(' -> ');
 		super(
-			`Circular dependency detected for ${String(Tag.id(tag))}: ${chain} -> ${String(Tag.id(tag))}`,
+			`Circular dependency detected for "${Tag.id(tag)}": ${chain} -> ${Tag.id(tag)}`,
 			{
 				detail: {
 					tag: Tag.id(tag),
@@ -194,56 +163,27 @@ export class CircularDependencyError extends SandlyError {
 }
 
 /**
- * Error thrown when a dependency factory function throws an error during instantiation.
+ * Error thrown when a dependency factory throws during instantiation.
  *
- * This wraps the original error with additional context about which dependency
- * failed to be created. The original error is preserved as the `cause` property.
+ * For nested dependencies (A depends on B depends on C), use `getRootCause()`
+ * to unwrap all layers and get the original error.
  *
- * When dependencies are nested (A depends on B depends on C), and C's factory throws,
- * you get nested DependencyCreationErrors. Use `getRootCause()` to get the original error.
- *
- * @example Factory throwing error
+ * @example
  * ```typescript
- * class DatabaseService extends Tag.Service('DatabaseService') {}
- *
- * const container = Container.empty().register(DatabaseService, () => {
- *   throw new Error('Database connection failed');
- * });
- *
  * try {
- *   await c.resolve(DatabaseService);
+ *   await container.resolve(UserService);
  * } catch (error) {
  *   if (error instanceof DependencyCreationError) {
  *     console.error('Failed to create:', error.message);
- *     console.error('Original error:', error.cause);
- *   }
- * }
- * ```
- *
- * @example Getting root cause from nested errors
- * ```typescript
- * // ServiceA -> ServiceB -> ServiceC (ServiceC throws)
- * try {
- *   await container.resolve(ServiceA);
- * } catch (error) {
- *   if (error instanceof DependencyCreationError) {
- *     console.error('Top-level error:', error.message); // "Error creating instance of ServiceA"
  *     const rootCause = error.getRootCause();
- *     console.error('Root cause:', rootCause); // Original error from ServiceC
+ *     console.error('Root cause:', rootCause);
  *   }
  * }
  * ```
  */
 export class DependencyCreationError extends SandlyError {
-	/**
-	 * @internal
-	 * Creates a DependencyCreationError wrapping the original factory error.
-	 *
-	 * @param tag - The tag of the dependency that failed to be created
-	 * @param error - The original error thrown by the factory function
-	 */
 	constructor(tag: AnyTag, error: unknown) {
-		super(`Error creating instance of ${String(Tag.id(tag))}`, {
+		super(`Error creating instance of "${Tag.id(tag)}"`, {
 			cause: error,
 			detail: {
 				tag: Tag.id(tag),
@@ -254,27 +194,12 @@ export class DependencyCreationError extends SandlyError {
 	/**
 	 * Traverses the error chain to find the root cause error.
 	 *
-	 * When dependencies are nested, each level wraps the error in a DependencyCreationError.
-	 * This method unwraps all the layers to get to the original error that started the failure.
-	 *
-	 * @returns The root cause error (not a DependencyCreationError unless that's the only error)
-	 *
-	 * @example
-	 * ```typescript
-	 * try {
-	 *   await container.resolve(UserService);
-	 * } catch (error) {
-	 *   if (error instanceof DependencyCreationError) {
-	 *     const rootCause = error.getRootCause();
-	 *     console.error('Root cause:', rootCause);
-	 *   }
-	 * }
-	 * ```
+	 * When dependencies are nested, each level wraps the error.
+	 * This method unwraps all layers to get the original error.
 	 */
 	getRootCause(): unknown {
 		let current: unknown = this.cause;
 
-		// Traverse the chain while we have DependencyCreationErrors
 		while (
 			current instanceof DependencyCreationError &&
 			current.cause !== undefined
@@ -289,44 +214,33 @@ export class DependencyCreationError extends SandlyError {
 /**
  * Error thrown when one or more finalizers fail during container destruction.
  *
- * This error aggregates multiple finalizer failures that occurred during
- * `container.destroy()`. Even if some finalizers fail, the container cleanup
- * process continues and this error contains details of all failures.
+ * Even if some finalizers fail, cleanup continues for all others.
+ * This error aggregates all failures.
  *
- * @example Handling finalization errors
+ * @example
  * ```typescript
  * try {
  *   await container.destroy();
  * } catch (error) {
  *   if (error instanceof DependencyFinalizationError) {
- *     console.error('Some finalizers failed');
- *     console.error('Error details:', error.detail.errors);
+ *     console.error('Cleanup failures:', error.getRootCauses());
  *   }
  * }
  * ```
  */
 export class DependencyFinalizationError extends SandlyError {
-	/**
-	 * @internal
-	 * Creates a DependencyFinalizationError aggregating multiple finalizer failures.
-	 *
-	 * @param errors - Array of errors thrown by individual finalizers
-	 */
 	constructor(private readonly errors: unknown[]) {
-		const lambdaErrors = errors.map((error) => SandlyError.ensure(error));
-		super('Error destroying dependency container', {
+		const sandlyErrors = errors.map((error) => SandlyError.ensure(error));
+		super('Error destroying container', {
 			cause: errors[0],
 			detail: {
-				errors: lambdaErrors.map((error) => error.dump()),
+				errors: sandlyErrors.map((error) => error.dump()),
 			},
 		});
 	}
 
 	/**
-	 * Returns the root causes of the errors that occurred during finalization.
-	 *
-	 * @returns An array of the errors that occurred during finalization.
-	 * You can expect at least one error in the array.
+	 * Returns all root cause errors from the finalization failures.
 	 */
 	getRootCauses(): unknown[] {
 		return this.errors;

@@ -1,24 +1,74 @@
-import { Container, ContainerTags, IContainer } from './container.js';
-import { ScopedContainer } from './scoped-container.js';
-import { AnyTag } from './tag.js';
+import {
+	Container,
+	ContainerBuilder,
+	type Finalizer,
+	type IContainer,
+	type IContainerBuilder,
+	type ResolutionContext,
+	ScopedContainer,
+	ScopedContainerBuilder,
+} from './container.js';
+import { AnyTag, ServiceTag, Tag, TagId, TagType, ValueTag } from './tag.js';
 import { Contravariant, Covariant } from './types.js';
 
 /**
  * Replaces the TTags type parameter in a container type with a new type.
  * Preserves the concrete container type (Container, ScopedContainer, or IContainer).
- *
- * Uses contravariance to detect container types:
- * - Any ScopedContainer<X> extends ScopedContainer<never>
- * - Any Container<X> extends Container<never> (but not ScopedContainer<never>)
- * - Falls back to IContainer for anything else
  * @internal
  */
-export type WithContainerTags<TContainer, TNewTags extends AnyTag> =
-	TContainer extends ScopedContainer<never>
-		? ScopedContainer<TNewTags>
-		: TContainer extends Container<never>
-			? Container<TNewTags>
-			: IContainer<TNewTags>;
+export type WithContainerTags<
+	TContainer,
+	TNewTags extends AnyTag,
+> = TContainer extends ScopedContainer
+	? ScopedContainer<TNewTags>
+	: TContainer extends Container
+		? Container<TNewTags>
+		: IContainer<TNewTags>;
+
+/**
+ * Replaces the TTags type parameter in a builder type with a new type.
+ * Preserves the concrete builder type (ContainerBuilder or ScopedContainerBuilder).
+ * @internal
+ */
+export type WithBuilderTags<
+	TBuilder,
+	TNewTags extends AnyTag,
+> = TBuilder extends ScopedContainerBuilder
+	? ScopedContainerBuilder<TNewTags>
+	: TBuilder extends ContainerBuilder
+		? ContainerBuilder<TNewTags>
+		: IContainerBuilder<TNewTags>;
+
+/**
+ * Defines what constitutes a valid dependency for a given parameter type T.
+ * A valid dependency is either:
+ * - A ServiceTag (class) whose instances are assignable to T
+ * - A ValueTag whose value type is assignable to T
+ * - A raw value of type T
+ * @internal
+ */
+type ValidDepFor<T> =
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	| (T extends object ? ServiceTag<T> | ValueTag<any, T> : ValueTag<any, T>)
+	| T;
+
+/**
+ * Maps constructor parameters to valid dependency types.
+ * Each parameter type T becomes ValidDepFor<T>.
+ * @internal
+ */
+type ValidDepsFor<TParams extends readonly unknown[]> = {
+	readonly [K in keyof TParams]: ValidDepFor<TParams[K]>;
+};
+
+/**
+ * Extracts only the tags from a dependency array (filters out raw values).
+ * Used to determine layer requirements.
+ * @internal
+ */
+type ExtractTags<T extends readonly unknown[]> = {
+	[K in keyof T]: T[K] extends AnyTag ? T[K] : never;
+}[number];
 
 /**
  * The most generic layer type that accepts any concrete layer.
@@ -32,134 +82,73 @@ export type AnyLayer = Layer<any, any>;
 export const LayerTypeId: unique symbol = Symbol.for('sandly/Layer');
 
 /**
+ * Helper type that extracts the union of all requirements from an array of layers.
+ * @internal
+ */
+type UnionOfRequires<T extends readonly AnyLayer[]> = {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	[K in keyof T]: T[K] extends Layer<infer R, any> ? R : never;
+}[number];
+
+/**
+ * Helper type that extracts the union of all provisions from an array of layers.
+ * @internal
+ */
+type UnionOfProvides<T extends readonly AnyLayer[]> = {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	[K in keyof T]: T[K] extends Layer<any, infer P> ? P : never;
+}[number];
+
+/**
  * A dependency layer represents a reusable, composable unit of dependency registrations.
  * Layers allow you to organize your dependency injection setup into logical groups
  * that can be combined and reused across different contexts.
  *
  * ## Type Variance
  *
- * The Layer interface uses TypeScript's variance annotations to enable safe substitutability:
+ * - **TRequires (covariant)**: A layer requiring fewer dependencies can substitute one requiring more
+ * - **TProvides (contravariant)**: A layer providing more services can substitute one providing fewer
  *
- * ### TRequires (covariant)
- * A layer requiring fewer dependencies can substitute one requiring more:
- * - `Layer<never, X>` can be used where `Layer<A | B, X>` is expected
- * - Intuition: A service that needs nothing is more flexible than one that needs specific deps
+ * @template TRequires - The union of tags this layer requires
+ * @template TProvides - The union of tags this layer provides
  *
- * ### TProvides (contravariant)
- * A layer providing more services can substitute one providing fewer:
- * - `Layer<X, A | B>` can be used where `Layer<X, A>` is expected
- * - Intuition: A service that gives you extra things is compatible with expecting fewer things
- *
- * @template TRequires - The union of tags this layer requires to be satisfied by other layers
- * @template TProvides - The union of tags this layer provides/registers
- *
- * @example Basic layer usage
+ * @example
  * ```typescript
- * import { layer, Tag, container } from 'sandly';
+ * // Create layers using Layer.service(), Layer.value(), or Layer.create()
+ * const dbLayer = Layer.service(Database, []);
+ * const userLayer = Layer.service(UserService, [Database]);
  *
- * class DatabaseService extends Tag.Service('DatabaseService') {
- *   query() { return 'data'; }
- * }
+ * // Compose layers
+ * const appLayer = userLayer.provide(dbLayer);
  *
- * // Create a layer that provides DatabaseService
- * const databaseLayer = layer<never, typeof DatabaseService>((container) =>
- *   container.register(DatabaseService, () => new DatabaseService())
- * );
- *
- * // Apply the layer to a container
- * const container = Container.empty();
- * const finalContainer = databaseLayer.register(c);
- *
- * const db = await finalContainer.resolve(DatabaseService);
- * ```
- *
- * @example Layer composition with variance
- * ```typescript
- * // Layer that requires DatabaseService and provides UserService
- * const userLayer = layer<typeof DatabaseService, typeof UserService>((container) =>
- *   container.register(UserService, async (ctx) =>
- *     new UserService(await ctx.resolve(DatabaseService))
- *   )
- * );
- *
- * // Compose layers: provide database layer to user layer
- * const appLayer = userLayer.provide(databaseLayer);
+ * // Create container from layer
+ * const container = Container.from(appLayer);
  * ```
  */
-export interface Layer<
-	// Covariant: A layer requiring fewer dependencies can substitute one requiring more
-	// Layer<never, X> can be used where Layer<A | B, X> is expected (less demanding is more compatible)
-	TRequires extends AnyTag,
-	// Contravariant: A layer providing more services can substitute one providing fewer
-	// Layer<X, A | B> can be used where Layer<X, A> is expected (more generous is more compatible)
-	TProvides extends AnyTag,
-> {
+export interface Layer<TRequires extends AnyTag, TProvides extends AnyTag> {
 	readonly [LayerTypeId]?: {
 		readonly _TRequires: Covariant<TRequires>;
 		readonly _TProvides: Contravariant<TProvides>;
 	};
 
 	/**
-	 * Applies this layer's registrations to the given container.
-	 *
-	 * ## Generic Container Support
-	 *
-	 * The signature uses `TContainer extends AnyTag` to accept containers with any existing
-	 * services while preserving type information. The container must provide at least this
-	 * layer's requirements (`TRequires`) but can have additional services (`TContainer`).
-	 *
-	 * Result container has: `TRequires | TContainer | TProvides` - everything that was
-	 * already there plus this layer's new provisions.
-	 *
-	 * @param container - The container to register dependencies into (must satisfy TRequires)
-	 * @returns A new container with this layer's dependencies registered and all existing services preserved
-	 *
-	 * @example Basic usage
-	 * ```typescript
-	 * const container = Container.empty();
-	 * const updatedContainer = myLayer.register(c);
-	 * ```
-	 *
-	 * @example With existing services preserved
-	 * ```typescript
-	 * const baseContainer = Container.empty()
-	 *   .register(ExistingService, () => new ExistingService());
-	 *
-	 * const enhanced = myLayer.register(baseContainer);
-	 * // Enhanced container has both ExistingService and myLayer's provisions
-	 * ```
+	 * Applies this layer's registrations to a container builder.
+	 * Works with both ContainerBuilder and ScopedContainerBuilder.
+	 * @internal
 	 */
-	register: <TContainer extends IContainer<TRequires>>(
-		container: TContainer
-	) => WithContainerTags<TContainer, ContainerTags<TContainer> | TProvides>;
+	apply: <TBuilder extends IContainerBuilder<TRequires>>(
+		builder: TBuilder
+	) => WithBuilderTags<TBuilder, TRequires | TProvides>;
 
 	/**
-	 * Provides a dependency layer to this layer, creating a pipeline where the dependency layer's
-	 * provisions satisfy this layer's requirements. This creates a dependency flow from dependency → this.
+	 * Provides a dependency layer to this layer, creating a pipeline.
+	 * The result only exposes this layer's provisions (not the dependency's).
 	 *
-	 * Type-safe: This layer's requirements must be satisfiable by the dependency layer's
-	 * provisions and any remaining external requirements.
-	 *
-	 * @template TDepRequires - What the dependency layer requires
-	 * @template TDepProvides - What the dependency layer provides
-	 * @param dependency - The layer to provide as a dependency
-	 * @returns A new composed layer that only exposes this layer's provisions
-	 *
-	 * @example Simple composition
-	 * ```typescript
-	 * const configLayer = layer<never, typeof ConfigTag>(...);
-	 * const dbLayer = layer<typeof ConfigTag, typeof DatabaseService>(...);
-	 *
-	 * // Provide config to database layer
-	 * const infraLayer = dbLayer.provide(configLayer);
-	 * ```
-	 *
-	 * @example Multi-level composition (reads naturally left-to-right)
+	 * @example
 	 * ```typescript
 	 * const appLayer = apiLayer
 	 *   .provide(serviceLayer)
-	 *   .provide(databaseLayer)
-	 *   .provide(configLayer);
+	 *   .provide(databaseLayer);
 	 * ```
 	 */
 	provide: <TDepRequires extends AnyTag, TDepProvides extends AnyTag>(
@@ -167,37 +156,13 @@ export interface Layer<
 	) => Layer<TDepRequires | Exclude<TRequires, TDepProvides>, TProvides>;
 
 	/**
-	 * Provides a dependency layer to this layer and merges the provisions.
-	 * Unlike `.provide()`, this method includes both this layer's provisions and the dependency layer's
-	 * provisions in the result type. This is useful when you want to expose services from both layers.
+	 * Provides a dependency layer and merges both layers' provisions.
+	 * Unlike `.provide()`, this exposes both this layer's and the dependency's provisions.
 	 *
-	 * Type-safe: This layer's requirements must be satisfiable by the dependency layer's
-	 * provisions and any remaining external requirements.
-	 *
-	 * @template TDepRequires - What the dependency layer requires
-	 * @template TDepProvides - What the dependency layer provides
-	 * @param dependency - The layer to provide as a dependency
-	 * @returns A new composed layer that provides services from both layers
-	 *
-	 * @example Providing with merged provisions
+	 * @example
 	 * ```typescript
-	 * const configLayer = layer<never, typeof ConfigTag>(...);
-	 * const dbLayer = layer<typeof ConfigTag, typeof DatabaseService>(...);
-	 *
-	 * // Provide config to database layer, and both services are available
 	 * const infraLayer = dbLayer.provideMerge(configLayer);
-	 * // Type: Layer<never, typeof ConfigTag | typeof DatabaseService>
-	 * ```
-	 *
-	 * @example Difference from .provide()
-	 * ```typescript
-	 * // .provide() only exposes this layer's provisions:
-	 * const withProvide = dbLayer.provide(configLayer);
-	 * // Type: Layer<never, typeof DatabaseService>
-	 *
-	 * // .provideMerge() exposes both layers' provisions:
-	 * const withProvideMerge = dbLayer.provideMerge(configLayer);
-	 * // Type: Layer<never, typeof ConfigTag | typeof DatabaseService>
+	 * // Provides both Database and Config
 	 * ```
 	 */
 	provideMerge: <TDepRequires extends AnyTag, TDepProvides extends AnyTag>(
@@ -208,29 +173,12 @@ export interface Layer<
 	>;
 
 	/**
-	 * Merges this layer with another layer, combining their requirements and provisions.
-	 * This is useful for combining independent layers that don't have a dependency
-	 * relationship.
+	 * Merges this layer with another independent layer.
+	 * Combines their requirements and provisions.
 	 *
-	 * @template TOtherRequires - What the other layer requires
-	 * @template TOtherProvides - What the other layer provides
-	 * @param other - The layer to merge with
-	 * @returns A new merged layer requiring both layers' requirements and providing both layers' provisions
-	 *
-	 * @example Merging independent layers
+	 * @example
 	 * ```typescript
-	 * const persistenceLayer = layer<never, typeof DatabaseService | typeof CacheService>(...);
-	 * const loggingLayer = layer<never, typeof LoggerService>(...);
-	 *
-	 * // Combine infrastructure layers
 	 * const infraLayer = persistenceLayer.merge(loggingLayer);
-	 * ```
-	 *
-	 * @example Building complex layer combinations
-	 * ```typescript
-	 * const appInfraLayer = persistenceLayer
-	 *   .merge(messagingLayer)
-	 *   .merge(observabilityLayer);
 	 * ```
 	 */
 	merge: <TOtherRequires extends AnyTag, TOtherProvides extends AnyTag>(
@@ -239,82 +187,25 @@ export interface Layer<
 }
 
 /**
- * Creates a new dependency layer that encapsulates a set of dependency registrations.
- * Layers are the primary building blocks for organizing and composing dependency injection setups.
- *
- * @template TRequires - The union of dependency tags this layer requires from other layers or external setup
- * @template TProvides - The union of dependency tags this layer registers/provides
- *
- * @param register - Function that performs the dependency registrations. Receives a container.
- * @returns The layer instance.
- *
- * @example Simple layer
- * ```typescript
- * import { layer, Tag } from 'sandly';
- *
- * class DatabaseService extends Tag.Service('DatabaseService') {
- *   constructor(private url: string = 'sqlite://memory') {}
- *   query() { return 'data'; }
- * }
- *
- * // Layer that provides DatabaseService, requires nothing
- * const databaseLayer = layer<never, typeof DatabaseService>((container) =>
- *   container.register(DatabaseService, () => new DatabaseService())
- * );
- *
- * // Usage
- * const dbLayerInstance = databaseLayer;
- * ```
- *
- * @example Complex application layer structure
- * ```typescript
- * // Configuration layer
- * const configLayer = layer<never, typeof ConfigTag>((container) =>
- *   container.register(ConfigTag, () => loadConfig())
- * );
- *
- * // Infrastructure layer (requires config)
- * const infraLayer = layer<typeof ConfigTag, typeof DatabaseService | typeof CacheService>(
- *   (container) =>
- *     container
- *       .register(DatabaseService, async (ctx) => new DatabaseService(await ctx.resolve(ConfigTag)))
- *       .register(CacheService, async (ctx) => new CacheService(await ctx.resolve(ConfigTag)))
- * );
- *
- * // Service layer (requires infrastructure)
- * const serviceLayer = layer<typeof DatabaseService | typeof CacheService, typeof UserService>(
- *   (container) =>
- *     container.register(UserService, async (ctx) =>
- *       new UserService(await ctx.resolve(DatabaseService), await ctx.resolve(CacheService))
- *     )
- * );
- *
- * // Compose the complete application
- * const appLayer = serviceLayer.provide(infraLayer).provide(configLayer);
- * ```
+ * Creates a layer from a builder function.
+ * @internal
  */
-export function layer<
-	TRequires extends AnyTag = never,
-	TProvides extends AnyTag = never,
->(
-	register: <TContainer extends AnyTag>(
-		container: IContainer<TRequires | TContainer>
-	) => IContainer<TRequires | TContainer | TProvides>
+function createLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
+	applyFn: <TBuilder extends IContainerBuilder<TRequires>>(
+		builder: TBuilder
+	) => WithBuilderTags<TBuilder, TRequires | TProvides>
 ): Layer<TRequires, TProvides> {
 	const layerImpl: Layer<TRequires, TProvides> = {
-		register: <TContainer extends IContainer<TRequires>>(
-			container: TContainer
-		) =>
-			register(container) as WithContainerTags<
-				TContainer,
-				ContainerTags<TContainer> | TProvides
-			>,
+		apply: applyFn,
+
 		provide(dependency) {
 			return createProvidedLayer(dependency, layerImpl);
 		},
+
 		provideMerge(dependency) {
 			return createComposedLayer(dependency, layerImpl);
 		},
+
 		merge(other) {
 			return createMergedLayer(layerImpl, other);
 		},
@@ -323,67 +214,62 @@ export function layer<
 }
 
 /**
- * Internal function to create a provided layer from two layers.
- * This implements the `.provide()` method logic - only exposes target layer's provisions.
- *
+ * Creates a layer that only exposes the target's provisions.
  * @internal
  */
 function createProvidedLayer<
-	TRequires1 extends AnyTag,
-	TProvides1 extends AnyTag,
-	TRequires2 extends AnyTag,
-	TProvides2 extends AnyTag,
+	TDepRequires extends AnyTag,
+	TDepProvides extends AnyTag,
+	TRequires extends AnyTag,
+	TProvides extends AnyTag,
 >(
-	dependency: Layer<TRequires1, TProvides1>,
-	target: Layer<TRequires2, TProvides2>
-): Layer<TRequires1 | Exclude<TRequires2, TProvides1>, TProvides2> {
-	// The implementationo of provide is the same as provideMerge, we only need to narrow the return type
+	dependency: Layer<TDepRequires, TDepProvides>,
+	target: Layer<TRequires, TProvides>
+): Layer<TDepRequires | Exclude<TRequires, TDepProvides>, TProvides> {
+	// Implementation is the same as provideMerge, we only narrow the return type
 	return createComposedLayer(dependency, target) as Layer<
-		TRequires1 | Exclude<TRequires2, TProvides1>,
-		TProvides2
+		TDepRequires | Exclude<TRequires, TDepProvides>,
+		TProvides
 	>;
 }
 
 /**
- * Internal function to create a composed layer from two layers.
- * This implements the `.provideMerge()` method logic - exposes both layers' provisions.
- *
+ * Creates a composed layer that exposes both layers' provisions.
  * @internal
  */
 function createComposedLayer<
-	TRequires1 extends AnyTag,
-	TProvides1 extends AnyTag,
-	TRequires2 extends AnyTag,
-	TProvides2 extends AnyTag,
+	TDepRequires extends AnyTag,
+	TDepProvides extends AnyTag,
+	TRequires extends AnyTag,
+	TProvides extends AnyTag,
 >(
-	dependency: Layer<TRequires1, TProvides1>,
-	target: Layer<TRequires2, TProvides2>
+	dependency: Layer<TDepRequires, TDepProvides>,
+	target: Layer<TRequires, TProvides>
 ): Layer<
-	TRequires1 | Exclude<TRequires2, TProvides1>,
-	TProvides1 | TProvides2
+	TDepRequires | Exclude<TRequires, TDepProvides>,
+	TDepProvides | TProvides
 > {
-	return layer(
-		<TContainer extends AnyTag>(
-			container: IContainer<
-				TRequires1 | Exclude<TRequires2, TProvides1> | TContainer
-			>
-		) => {
-			const containerWithDependency = dependency.register(
-				container
-				// The type
-				// IContainer<TRequires1 | TProvides1 | Exclude<TRequires2, TProvides1> | TContainer>
-				// can be simplified to
-				// IContainer<TRequires1 | TRequires2 | TProvides1 | TContainer>
-			) as IContainer<TRequires1 | TRequires2 | TProvides1 | TContainer>;
-			return target.register(containerWithDependency);
-		}
-	);
+	return {
+		apply: (builder) => {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const withDep = dependency.apply(builder as any);
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
+			return target.apply(withDep as any) as any;
+		},
+		provide(dep) {
+			return createProvidedLayer(dep, this);
+		},
+		provideMerge(dep) {
+			return createComposedLayer(dep, this);
+		},
+		merge(other) {
+			return createMergedLayer(this, other);
+		},
+	};
 }
 
 /**
- * Internal function to create a merged layer from two layers.
- * This implements the `.merge()` method logic.
- *
+ * Creates a merged layer from two independent layers.
  * @internal
  */
 function createMergedLayer<
@@ -395,133 +281,219 @@ function createMergedLayer<
 	layer1: Layer<TRequires1, TProvides1>,
 	layer2: Layer<TRequires2, TProvides2>
 ): Layer<TRequires1 | TRequires2, TProvides1 | TProvides2> {
-	return layer(
-		<TContainer extends AnyTag>(
-			container: IContainer<TRequires1 | TRequires2 | TContainer>
-		) => {
-			const container1 = layer1.register(container);
-			const container2 = layer2.register(container1);
-			return container2;
-		}
-	);
+	return {
+		apply: (builder) => {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const with1 = layer1.apply(builder as any);
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
+			return layer2.apply(with1 as any) as any;
+		},
+		provide(dep) {
+			return createProvidedLayer(dep, this);
+		},
+		provideMerge(dep) {
+			return createComposedLayer(dep, this);
+		},
+		merge(other) {
+			return createMergedLayer(this, other);
+		},
+	};
 }
 
 /**
- * Helper type that extracts the union of all requirements from an array of layers.
- * Used by Layer.mergeAll() to compute the correct requirement type for the merged layer.
+ * Consolidated Layer API for creating and composing dependency layers.
  *
- * Works with AnyLayer[] constraint which accepts any concrete layer through variance:
- * - Layer<never, X> → extracts `never` (no requirements)
- * - Layer<A | B, Y> → extracts `A | B` (specific requirements)
+ * @example
+ * ```typescript
+ * // Define services
+ * class Database {
+ *   query(sql: string) { return []; }
+ * }
  *
- * @internal
- */
-type UnionOfRequires<T extends readonly AnyLayer[]> = {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	[K in keyof T]: T[K] extends Layer<infer R, any> ? R : never;
-}[number];
-
-/**
- * Helper type that extracts the union of all provisions from an array of layers.
- * Used by Layer.mergeAll() to compute the correct provision type for the merged layer.
+ * class UserService {
+ *   constructor(private db: Database) {}
+ *   getUsers() { return this.db.query('SELECT * FROM users'); }
+ * }
  *
- * Works with AnyLayer[] constraint which accepts any concrete layer through variance:
- * - Layer<X, never> → extracts `never` (no provisions)
- * - Layer<Y, A | B> → extracts `A | B` (specific provisions)
+ * // Create layers
+ * const dbLayer = Layer.service(Database, []);
+ * const userLayer = Layer.service(UserService, [Database]);
  *
- * @internal
- */
-type UnionOfProvides<T extends readonly AnyLayer[]> = {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	[K in keyof T]: T[K] extends Layer<any, infer P> ? P : never;
-}[number];
-
-/**
- * Utility object containing helper functions for working with layers.
+ * // Compose and create container
+ * const appLayer = userLayer.provide(dbLayer);
+ * const container = Container.from(appLayer);
+ *
+ * const users = await container.resolve(UserService);
+ * ```
  */
 export const Layer = {
 	/**
-	 * Creates an empty layer that provides no dependencies and requires no dependencies.
-	 * This is useful as a base layer or for testing.
+	 * Creates a layer that provides a class service with automatic dependency injection.
 	 *
-	 * @returns An empty layer that can be used as a starting point for layer composition
+	 * The dependencies array must match the constructor parameters exactly (order and types).
+	 * This is validated at compile time.
+	 *
+	 * @param cls - The service class
+	 * @param deps - Array of dependencies (tags or raw values) matching constructor params
+	 * @param options - Optional cleanup function for the service
 	 *
 	 * @example
 	 * ```typescript
-	 * import { Layer } from 'sandly';
+	 * class UserService {
+	 *   constructor(private db: Database, private apiKey: string) {}
+	 * }
 	 *
-	 * const baseLayer = Layer.empty();
-	 * const appLayer = baseLayer
+	 * const ApiKeyTag = Tag.of('apiKey')<string>();
+	 *
+	 * // Dependencies must match constructor: (Database, string)
+	 * const userLayer = Layer.service(UserService, [Database, ApiKeyTag]);
+	 *
+	 * // Also works with raw values
+	 * const userLayer2 = Layer.service(UserService, [Database, 'my-api-key']);
+	 * ```
+	 */
+	service<TClass extends ServiceTag, const TDeps extends readonly unknown[]>(
+		cls: TClass,
+		deps: TDeps & ValidDepsFor<ConstructorParameters<TClass>>,
+		options?: { cleanup?: Finalizer<InstanceType<TClass>> }
+	): Layer<ExtractTags<TDeps>, TClass> {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		return createLayer((builder: any) => {
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+			return builder.add(cls, {
+				create: async (
+					ctx: ResolutionContext<ExtractTags<TDeps>>
+				): Promise<InstanceType<TClass>> => {
+					// Resolve tags, pass through raw values
+					const args = await Promise.all(
+						deps.map((dep) =>
+							// eslint-disable-next-line @typescript-eslint/no-explicit-any
+							Tag.isTag(dep) ? ctx.resolve(dep as any) : dep
+						)
+					);
+
+					return new cls(...args) as InstanceType<TClass>;
+				},
+				cleanup: options?.cleanup,
+			});
+		});
+	},
+
+	/**
+	 * Creates a layer that provides a constant value.
+	 *
+	 * @param tag - The ValueTag to register
+	 * @param value - The value to provide
+	 *
+	 * @example
+	 * ```typescript
+	 * const ApiKeyTag = Tag.of('apiKey')<string>();
+	 * const ConfigTag = Tag.of('config')<{ port: number }>();
+	 *
+	 * const configLayer = Layer.value(ApiKeyTag, 'secret-key')
+	 *   .merge(Layer.value(ConfigTag, { port: 3000 }));
+	 * ```
+	 */
+	value<T extends ValueTag<TagId, unknown>>(
+		tag: T,
+		value: TagType<T>
+	): Layer<never, T> {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		return createLayer((builder: any) => {
+			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+			return builder.add(tag, () => value);
+		});
+	},
+
+	/**
+	 * Creates a custom layer with full control over the factory logic.
+	 *
+	 * Use this when you need custom instantiation logic that can't be expressed
+	 * with `Layer.service()` or `Layer.value()`.
+	 *
+	 * - `TRequires` is inferred from the `requires` array
+	 * - `TProvides` is inferred from what `apply` adds to the builder
+	 *
+	 * @param options.requires - Array of tags this layer requires (use [] for no requirements)
+	 * @param options.apply - Function that adds registrations to a builder
+	 *
+	 * @example
+	 * ```typescript
+	 * // Layer with dependencies - TProvides inferred from builder.add()
+	 * const cacheLayer = Layer.create({
+	 *   requires: [Database],
+	 *   apply: (builder) => builder
+	 *     .add(Cache, async (ctx) => {
+	 *       const db = await ctx.resolve(Database);
+	 *       return new Cache(db, { ttl: 3600 });
+	 *     })
+	 * });
+	 * // Type: Layer<typeof Database, typeof Cache>
+	 *
+	 * // Layer with no dependencies
+	 * const dbLayer = Layer.create({
+	 *   requires: [],
+	 *   apply: (builder) => builder.add(Database, () => new Database())
+	 * });
+	 * // Type: Layer<never, typeof Database>
+	 * ```
+	 */
+	create<
+		const TRequires extends readonly AnyTag[],
+		TAllTags extends AnyTag,
+	>(options: {
+		requires: TRequires;
+		apply: (
+			builder: IContainerBuilder<TRequires[number]>
+		) => IContainerBuilder<TAllTags>;
+	}): Layer<TRequires[number], Exclude<TAllTags, TRequires[number]>> {
+		type TProvides = Exclude<TAllTags, TRequires[number]>;
+		const layer: Layer<TRequires[number], TProvides> = {
+			apply: (builder) => {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return
+				return options.apply(builder as any) as any;
+			},
+			provide(dep) {
+				return createProvidedLayer(dep, layer);
+			},
+			provideMerge(dep) {
+				return createComposedLayer(dep, layer);
+			},
+			merge(other) {
+				return createMergedLayer(layer, other);
+			},
+		};
+		return layer;
+	},
+
+	/**
+	 * Creates an empty layer with no requirements or provisions.
+	 *
+	 * @example
+	 * ```typescript
+	 * const baseLayer = Layer.empty()
 	 *   .merge(configLayer)
 	 *   .merge(serviceLayer);
 	 * ```
 	 */
 	empty(): Layer<never, never> {
-		return layer(
-			<TContainer extends AnyTag>(container: IContainer<TContainer>) =>
-				container
-		);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
+		return createLayer((builder: any) => builder);
 	},
 
 	/**
-	 * Merges multiple layers at once in a type-safe way.
-	 * This is equivalent to chaining `.merge()` calls but more convenient for multiple layers.
+	 * Merges multiple layers at once.
 	 *
-	 * ## Type Safety with Variance
+	 * @param layers - At least 2 layers to merge
+	 * @returns A layer combining all requirements and provisions
 	 *
-	 * Uses the AnyLayer constraint (Layer<never, AnyTag>) which accepts any concrete layer
-	 * through the Layer interface's variance annotations:
-	 *
-	 * - **Contravariant TRequires**: Layer<typeof ServiceA, X> can be passed because requiring
-	 *   ServiceA is more restrictive than requiring `never` (nothing)
-	 * - **Covariant TProvides**: Layer<Y, typeof ServiceB> can be passed because providing
-	 *   ServiceB is compatible with the general `AnyTag` type
-	 *
-	 * The return type correctly extracts and unions the actual requirement/provision types
-	 * from all input layers, preserving full type safety.
-	 *
-	 * All layers are merged in order, combining their requirements and provisions.
-	 * The resulting layer requires the union of all input layer requirements and
-	 * provides the union of all input layer provisions.
-	 *
-	 * @template T - The tuple type of layers to merge (constrained to AnyLayer for variance)
-	 * @param layers - At least 2 layers to merge together
-	 * @returns A new layer that combines all input layers with correct union types
-	 *
-	 * @example Basic usage with different layer types
+	 * @example
 	 * ```typescript
-	 * import { Layer } from 'sandly';
-	 *
-	 * // These all have different types but work thanks to variance:
-	 * const dbLayer = layer<never, typeof DatabaseService>(...);           // no requirements
-	 * const userLayer = layer<typeof DatabaseService, typeof UserService>(...); // requires DB
-	 * const configLayer = layer<never, typeof ConfigService>(...);        // no requirements
-	 *
-	 * const infraLayer = Layer.mergeAll(dbLayer, userLayer, configLayer);
-	 * // Type: Layer<typeof DatabaseService, typeof DatabaseService | typeof UserService | typeof ConfigService>
-	 * ```
-	 *
-	 * @example Equivalent to chaining .merge()
-	 * ```typescript
-	 * // These are equivalent:
-	 * const layer1 = Layer.mergeAll(layerA, layerB, layerC);
-	 * const layer2 = layerA.merge(layerB).merge(layerC);
-	 * ```
-	 *
-	 * @example Building infrastructure layers
-	 * ```typescript
-	 * const persistenceLayer = layer<never, typeof DatabaseService | typeof CacheService>(...);
-	 * const messagingLayer = layer<never, typeof MessageQueue>(...);
-	 * const observabilityLayer = layer<never, typeof Logger | typeof Metrics>(...);
-	 *
-	 * // Merge all infrastructure concerns into one layer
 	 * const infraLayer = Layer.mergeAll(
 	 *   persistenceLayer,
 	 *   messagingLayer,
 	 *   observabilityLayer
 	 * );
-	 *
-	 * // Result type: Layer<never, DatabaseService | CacheService | MessageQueue | Logger | Metrics>
 	 * ```
 	 */
 	mergeAll<T extends readonly [AnyLayer, AnyLayer, ...AnyLayer[]]>(
@@ -534,27 +506,8 @@ export const Layer = {
 	},
 
 	/**
-	 * Merges exactly two layers, combining their requirements and provisions.
-	 * This is similar to the `.merge()` method but available as a static function.
-	 *
-	 * @template TRequires1 - What the first layer requires
-	 * @template TProvides1 - What the first layer provides
-	 * @template TRequires2 - What the second layer requires
-	 * @template TProvides2 - What the second layer provides
-	 * @param layer1 - The first layer to merge
-	 * @param layer2 - The second layer to merge
-	 * @returns A new merged layer requiring both layers' requirements and providing both layers' provisions
-	 *
-	 * @example Merging two layers
-	 * ```typescript
-	 * import { Layer } from 'sandly';
-	 *
-	 * const dbLayer = layer<never, typeof DatabaseService>(...);
-	 * const cacheLayer = layer<never, typeof CacheService>(...);
-	 *
-	 * const persistenceLayer = Layer.merge(dbLayer, cacheLayer);
-	 * // Type: Layer<never, typeof DatabaseService | typeof CacheService>
-	 * ```
+	 * Merges exactly two layers.
+	 * Equivalent to `layer1.merge(layer2)`.
 	 */
 	merge<
 		TRequires1 extends AnyTag,

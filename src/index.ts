@@ -1,37 +1,41 @@
-export { constant } from './constant.js';
-export { Container } from './container.js';
+// Container
+export {
+	Container,
+	ContainerBuilder,
+	ScopedContainer,
+	ScopedContainerBuilder,
+} from './container.js';
 export type {
+	BuilderTags,
 	ContainerTags,
 	DependencyLifecycle,
 	DependencySpec,
 	Factory,
 	Finalizer,
 	IContainer,
+	IContainerBuilder,
 	ResolutionContext,
+	Scope,
 } from './container.js';
-export { dependency } from './dependency.js';
+
+// Errors
 export {
 	CircularDependencyError,
 	ContainerDestroyedError,
-	DependencyAlreadyInstantiatedError,
 	DependencyCreationError,
 	DependencyFinalizationError,
 	SandlyError,
 	UnknownDependencyError,
 } from './errors.js';
-export { Layer, layer } from './layer.js';
-export type { AnyLayer } from './layer.js';
-export { ScopedContainer } from './scoped-container.js';
-export type { Scope } from './scoped-container.js';
-export { autoService, service } from './service.js';
-export type { ServiceDependencies, ServiceDepsTuple } from './service.js';
-export {
-	InjectSource,
-	Tag,
-	type AnyTag,
-	type Inject,
-	type ServiceTag,
-	type TagType,
-	type ValueTag,
-} from './tag.js';
+export type { ErrorDump } from './errors.js';
+
+// Layer
+export { Layer } from './layer.js';
+export type { AnyLayer, Layer as LayerInterface } from './layer.js';
+
+// Tag
+export { Tag } from './tag.js';
+export type { AnyTag, ServiceTag, TagId, TagType, ValueTag } from './tag.js';
+
+// Types
 export type { PromiseOrValue } from './types.js';

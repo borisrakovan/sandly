@@ -1,180 +1,41 @@
 import {
 	CircularDependencyError,
 	ContainerDestroyedError,
-	DependencyAlreadyInstantiatedError,
 	DependencyCreationError,
 	DependencyFinalizationError,
 	UnknownDependencyError,
 } from './errors.js';
-import { AnyTag, Tag, TagType } from './tag.js';
+import { Layer } from './layer.js';
+import { AnyTag, TagType } from './tag.js';
 import { Contravariant, PromiseOrValue } from './types.js';
 
 /**
- * Type representing a factory function used to create dependency instances.
+ * Factory function that creates a dependency instance.
  *
- * Factory functions are the core mechanism for dependency creation in the DI system.
- * They receive a dependency container and can use it to resolve other dependencies
- * that the service being created needs.
- *
- * The factory can be either synchronous (returning T directly) or asynchronous
- * (returning Promise<T>). The container handles both cases transparently.
+ * Receives a resolution context for injecting other dependencies.
+ * Can be synchronous or asynchronous.
  *
  * @template T - The type of the service instance being created
- * @template TRequires - Union type of all required dependencies
- *
- * @example Synchronous factory
- * ```typescript
- * const factory: Factory<DatabaseService, never> = (ctx) => {
- *   return new DatabaseService('sqlite://memory');
- * };
- * ```
- *
- * @example Asynchronous factory with dependencies
- * ```typescript
- * const factory: Factory<UserService, typeof ConfigTag | typeof DatabaseService> = async (ctx) => {
- *   const [config, db] = await Promise.all([
- *     ctx.resolve(ConfigTag),
- *     ctx.resolve(DatabaseService)
- *   ]);
- *   return new UserService(config, db);
- * };
- * ```
+ * @template TRequires - Union type of required dependencies
  */
 export type Factory<T, TRequires extends AnyTag> = (
 	ctx: ResolutionContext<TRequires>
 ) => PromiseOrValue<T>;
 
 /**
- * Type representing a finalizer function used to clean up dependency instances.
+ * Cleanup function called when the container is destroyed.
  *
- * Finalizers are optional cleanup functions that are called when the container
- * is destroyed via `container.destroy()`. They receive the created instance
- * and should perform any necessary cleanup (closing connections, releasing resources, etc.).
- *
- * Like factories, finalizers can be either synchronous or asynchronous.
- * All finalizers are called concurrently during container destruction.
- *
- * @template T - The type of the service instance being finalized
- *
- * @example Synchronous finalizer
- * ```typescript
- * const cleanup: Finalizer<FileHandle> = (fileHandle) => {
- *   fileHandle.close();
- * };
- * ```
- *
- * @example Asynchronous finalizer
- * ```typescript
- * const cleanup: Finalizer<DatabaseConnection> = async (connection) => {
- *   await connection.disconnect();
- * };
- * ```
- *
- * @example Resilient finalizer
- * ```typescript
- * const cleanup: Finalizer<HttpServer> = async (server) => {
- *   try {
- *     await server.close();
- *   } catch (error) {
- *     if (!error.message.includes('already closed')) {
- *       throw error; // Re-throw unexpected errors
- *     }
- *     // Ignore "already closed" errors
- *   }
- * };
- * ```
+ * @template T - The type of the service instance being cleaned up
  */
 export type Finalizer<T> = (instance: T) => PromiseOrValue<void>;
 
 /**
- * Type representing a complete dependency lifecycle with both factory and finalizer.
+ * Complete dependency lifecycle with factory and optional cleanup.
  *
- * This interface is used when registering dependencies that need cleanup. Instead of
- * passing separate factory and finalizer parameters, you can pass an object
- * containing both.
- *
- * Since this is an interface, you can also implement it as a class for better
- * organization and reuse. This is particularly useful when you have complex
- * lifecycle logic or want to share lifecycle definitions across multiple services.
+ * Can be implemented as a class for complex lifecycle logic.
  *
  * @template T - The instance type
- * @template TRequires - Union type of all required dependencies
- *
- * @example Using DependencyLifecycle as an object
- * ```typescript
- * import { Container, Tag } from 'sandly';
- *
- * class DatabaseConnection extends Tag.Service('DatabaseConnection') {
- *   async connect() { return; }
- *   async disconnect() { return; }
- * }
- *
- * const lifecycle: DependencyLifecycle<DatabaseConnection, never> = {
- *   create: async () => {
- *     const conn = new DatabaseConnection();
- *     await conn.connect();
- *     return conn;
- *   },
- *   cleanup: async (conn) => {
- *     await conn.disconnect();
- *   }
- * };
- *
- * Container.empty().register(DatabaseConnection, lifecycle);
- * ```
- *
- * @example Implementing DependencyLifecycle as a class with dependencies
- * ```typescript
- * import { Container, Tag, type ResolutionContext } from 'sandly';
- *
- * class Logger extends Tag.Service('Logger') {
- *   log(message: string) { console.log(message); }
- * }
- *
- * class DatabaseConnection extends Tag.Service('DatabaseConnection') {
- *   constructor(private logger: Logger, private url: string) { super(); }
- *   async connect() { this.logger.log('Connected'); }
- *   async disconnect() { this.logger.log('Disconnected'); }
- * }
- *
- * class DatabaseLifecycle implements DependencyLifecycle<DatabaseConnection, typeof Logger> {
- *   constructor(private url: string) {}
- *
- *   async create(ctx: ResolutionContext<typeof Logger>): Promise<DatabaseConnection> {
- *     const logger = await ctx.resolve(Logger);
- *     const conn = new DatabaseConnection(logger, this.url);
- *     await conn.connect();
- *     return conn;
- *   }
- *
- *   async cleanup(conn: DatabaseConnection): Promise<void> {
- *     await conn.disconnect();
- *   }
- * }
- *
- * const container = Container.empty()
- *   .register(Logger, () => new Logger())
- *   .register(DatabaseConnection, new DatabaseLifecycle('postgresql://localhost:5432'));
- * ```
- *
- * @example Class with only factory (no cleanup)
- * ```typescript
- * import { Container, Tag } from 'sandly';
- *
- * class SimpleService extends Tag.Service('SimpleService') {}
- *
- * class SimpleServiceLifecycle implements DependencyLifecycle<SimpleService, never> {
- *   create(): SimpleService {
- *     return new SimpleService();
- *   }
- *   // cleanup is optional, so it can be omitted
- * }
- *
- * const container = Container.empty().register(
- *   SimpleService,
- *   new SimpleServiceLifecycle()
- * );
- * ```
+ * @template TRequires - Union type of required dependencies
  */
 export interface DependencyLifecycle<T, TRequires extends AnyTag> {
 	create: Factory<T, TRequires>;
@@ -182,44 +43,16 @@ export interface DependencyLifecycle<T, TRequires extends AnyTag> {
 }
 
 /**
- * Union type representing all valid dependency registration specifications.
- *
- * A dependency can be registered either as:
- * - A simple factory function that creates the dependency
- * - A complete lifecycle object with both factory and finalizer
- *
- * @template T - The dependency tag type
- * @template TRequires - Union type of all required dependencies
- *
- * @example Simple factory registration
- * ```typescript
- * const spec: DependencySpec<typeof UserService, never> =
- *   () => new UserService();
- *
- * Container.empty().register(UserService, spec);
- * ```
- *
- * @example Lifecycle registration
- * ```typescript
- * const spec: DependencySpec<typeof DatabaseConnection, never> = {
- *   create: () => new DatabaseConnection(),
- *   cleanup: (conn) => conn.close()
- * };
- *
- * Container.empty().register(DatabaseConnection, spec);
- * ```
+ * Valid dependency registration: either a factory function or lifecycle object.
  */
 export type DependencySpec<T extends AnyTag, TRequires extends AnyTag> =
 	| Factory<TagType<T>, TRequires>
 	| DependencyLifecycle<TagType<T>, TRequires>;
 
 /**
- * Type representing the context available to factory functions during dependency resolution.
+ * Context available to factory functions during resolution.
  *
- * This type contains only the `resolve` and `resolveAll` methods from the container, which are used to retrieve
- * other dependencies during the creation of a service.
- *
- * @template TTags - Union type of all dependencies available in the container
+ * Provides `resolve` and `resolveAll` for injecting dependencies.
  */
 export type ResolutionContext<TTags extends AnyTag> = Pick<
 	IContainer<TTags>,
@@ -251,263 +84,99 @@ class ResolutionContextImpl<
 	}
 }
 
+/**
+ * Unique symbol for container type branding.
+ */
 export const ContainerTypeId: unique symbol = Symbol.for('sandly/Container');
 
 /**
- * Interface representing a container that can register and retrieve dependencies.
+ * Interface for dependency containers.
  *
- * @template TTags - Union type of all dependencies available in the container
+ * @template TTags - Union type of registered dependency tags
  */
 export interface IContainer<TTags extends AnyTag = never> {
 	readonly [ContainerTypeId]: {
 		readonly _TTags: Contravariant<TTags>;
 	};
 
-	register: <T extends AnyTag>(
-		tag: T,
-		spec: DependencySpec<T, TTags>
-	) => IContainer<TTags | T>;
-
-	has(tag: AnyTag): boolean;
-
-	exists(tag: AnyTag): boolean;
-
 	resolve: <T extends TTags>(tag: T) => Promise<TagType<T>>;
-
 	resolveAll: <const T extends readonly TTags[]>(
 		...tags: T
 	) => Promise<{ [K in keyof T]: TagType<T[K]> }>;
-
+	use: <T extends TTags, R>(
+		tag: T,
+		fn: (service: TagType<T>) => PromiseOrValue<R>
+	) => Promise<R>;
 	destroy(): Promise<void>;
 }
 
 /**
- * Extracts the registered tags (TTags) from a container type.
+ * Extracts the registered tags from a container type.
  */
 export type ContainerTags<C> =
 	C extends IContainer<infer TTags> ? TTags : never;
 
 /**
- * A type-safe dependency injection container that manages service instantiation,
- * caching, and lifecycle management with support for async dependencies and
- * circular dependency detection.
- *
- * The container maintains complete type safety by tracking registered dependencies
- * at the type level, ensuring that only registered dependencies can be retrieved
- * and preventing runtime errors.
- *
- * @template TTags - Union type of all registered dependency tags in this container
- *
- * @example Basic usage with service tags
- * ```typescript
- * import { container, Tag } from 'sandly';
- *
- * class DatabaseService extends Tag.Service('DatabaseService') {
- *   query() { return 'data'; }
- * }
- *
- * class UserService extends Tag.Service('UserService') {
- *   constructor(private db: DatabaseService) {}
- *   getUser() { return this.db.query(); }
- * }
- *
- * const container = Container.empty()
- *   .register(DatabaseService, () => new DatabaseService())
- *   .register(UserService, async (ctx) =>
- *     new UserService(await ctx.resolve(DatabaseService))
- *   );
- *
- * const userService = await c.resolve(UserService);
- * ```
- *
- * @example Usage with value tags
- * ```typescript
- * const ApiKeyTag = Tag.of('apiKey')<string>();
- * const ConfigTag = Tag.of('config')<{ dbUrl: string }>();
- *
- * const container = Container.empty()
- *   .register(ApiKeyTag, () => process.env.API_KEY!)
- *   .register(ConfigTag, () => ({ dbUrl: 'postgresql://localhost:5432' }));
- *
- * const apiKey = await c.resolve(ApiKeyTag);
- * const config = await c.resolve(ConfigTag);
- * ```
- *
- * @example With finalizers for cleanup
- * ```typescript
- * class DatabaseConnection extends Tag.Service('DatabaseConnection') {
- *   async connect() { return; }
- *   async disconnect() { return; }
- * }
- *
- * const container = Container.empty().register(
- *   DatabaseConnection,
- *   async () => {
- *     const conn = new DatabaseConnection();
- *     await conn.connect();
- *     return conn;
- *   },
- *   async (conn) => conn.disconnect() // Finalizer for cleanup
- * );
- *
- * // Later...
- * await c.destroy(); // Calls all finalizers
- * ```
+ * Common interface for container builders that support adding dependencies.
+ * Used by Layer to work with both ContainerBuilder and ScopedContainerBuilder.
  */
-export class Container<TTags extends AnyTag> implements IContainer<TTags> {
-	readonly [ContainerTypeId]!: {
-		readonly _TTags: Contravariant<TTags>;
-	};
-
-	// Make the constructor protected to prevent direct instantiation
-	// and force the use of the static empty() method.
-	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	protected constructor() {}
-
-	/**
-	 * Cache of instantiated dependencies as promises.
-	 * Ensures singleton behavior and supports concurrent access.
-	 * @internal
-	 */
-	protected readonly cache = new Map<AnyTag, Promise<unknown>>();
-
-	/**
-	 * Factory functions for creating dependency instances.
-	 * @internal
-	 */
-	protected readonly factories = new Map<AnyTag, Factory<unknown, TTags>>();
-
-	/**
-	 * Finalizer functions for cleaning up dependencies when the container is destroyed.
-	 * @internal
-	 */
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	protected readonly finalizers = new Map<AnyTag, Finalizer<any>>();
-
-	/**
-	 * Flag indicating whether this container has been destroyed.
-	 * @internal
-	 */
-	protected isDestroyed = false;
-
-	/**
-	 * Creates a new empty container instance.
-	 * @returns A new empty Container instance with no registered dependencies.
-	 */
-	static empty(): Container<never> {
-		return new Container();
-	}
-
-	/**
-	 * Registers a dependency in the container with a factory function and optional finalizer.
-	 *
-	 * The factory function receives the current container instance and must return the
-	 * service instance (or a Promise of it). The container tracks the registration at
-	 * the type level, ensuring type safety for subsequent `.resolve()` calls.
-	 *
-	 * If a dependency is already registered, this method will override it unless the
-	 * dependency has already been instantiated, in which case it will throw an error.
-	 *
-	 * @template T - The dependency tag being registered
-	 * @param tag - The dependency tag (class or value tag)
-	 * @param factory - Function that creates the service instance, receives container for dependency injection
-	 * @param finalizer - Optional cleanup function called when container is destroyed
-	 * @returns A new container instance with the dependency registered
-	 * @throws {ContainerDestroyedError} If the container has been destroyed
-	 * @throws {Error} If the dependency has already been instantiated
-	 *
-	 * @example Registering a simple service
-	 * ```typescript
-	 * class LoggerService extends Tag.Service('LoggerService') {
-	 *   log(message: string) { console.log(message); }
-	 * }
-	 *
-	 * const container = Container.empty().register(
-	 *   LoggerService,
-	 *   () => new LoggerService()
-	 * );
-	 * ```
-	 *
-	 * @example Registering with dependencies
-	 * ```typescript
-	 * class UserService extends Tag.Service('UserService') {
-	 *   constructor(private db: DatabaseService, private logger: LoggerService) {}
-	 * }
-	 *
-	 * const container = Container.empty()
-	 *   .register(DatabaseService, () => new DatabaseService())
-	 *   .register(LoggerService, () => new LoggerService())
-	 *   .register(UserService, async (ctx) =>
-	 *     new UserService(
-	 *       await ctx.resolve(DatabaseService),
-	 *       await ctx.resolve(LoggerService)
-	 *     )
-	 *   );
-	 * ```
-	 *
-	 * @example Overriding a dependency
-	 * ```typescript
-	 * const container = Container.empty()
-	 *   .register(DatabaseService, () => new DatabaseService())
-	 *   .register(DatabaseService, () => new MockDatabaseService()); // Overrides the previous registration
-	 * ```
-	 *
-	 * @example Using value tags
-	 * ```typescript
-	 * const ConfigTag = Tag.of('config')<{ apiUrl: string }>();
-	 *
-	 * const container = Container.empty().register(
-	 *   ConfigTag,
-	 *   () => ({ apiUrl: 'https://api.example.com' })
-	 * );
-	 * ```
-	 *
-	 * @example With finalizer for cleanup
-	 * ```typescript
-	 * class DatabaseConnection extends Tag.Service('DatabaseConnection') {
-	 *   async connect() { return; }
-	 *   async close() { return; }
-	 * }
-	 *
-	 * const container = Container.empty().register(
-	 *   DatabaseConnection,
-	 *   async () => {
-	 *     const conn = new DatabaseConnection();
-	 *     await conn.connect();
-	 *     return conn;
-	 *   },
-	 *   (conn) => conn.close() // Called during container.destroy()
-	 * );
-	 * ```
-	 */
-	register<T extends AnyTag>(
+export interface IContainerBuilder<TTags extends AnyTag = never> {
+	add<T extends AnyTag>(
 		tag: T,
 		spec: DependencySpec<T, TTags>
-	): Container<TTags | T> {
-		if (this.isDestroyed) {
-			throw new ContainerDestroyedError(
-				'Cannot register dependencies on a destroyed container'
-			);
-		}
+	): IContainerBuilder<TTags | T>;
+}
 
-		// Check if dependency has been instantiated (exists in cache)
-		if (this.has(tag) && this.exists(tag)) {
-			throw new DependencyAlreadyInstantiatedError(
-				`Cannot register dependency ${String(Tag.id(tag))} - it has already been instantiated. ` +
-					`Registration must happen before any instantiation occurs, as cached instances ` +
-					`would still be used by existing dependencies.`
-			);
-		}
+/**
+ * Extracts the registered tags from a builder type.
+ */
+export type BuilderTags<B> =
+	B extends IContainerBuilder<infer TTags> ? TTags : never;
 
-		// Replace the factory and finalizer (implicit override)
+/**
+ * Builder for constructing immutable containers.
+ *
+ * Use `Container.builder()` to create a builder, then chain `.add()` calls
+ * to register dependencies, and finally call `.build()` to create the container.
+ *
+ * @template TTags - Union type of registered dependency tags
+ *
+ * @example
+ * ```typescript
+ * const container = Container.builder()
+ *   .add(Database, () => new Database())
+ *   .add(UserService, async (ctx) =>
+ *     new UserService(await ctx.resolve(Database))
+ *   )
+ *   .build();
+ * ```
+ */
+export class ContainerBuilder<TTags extends AnyTag = never> {
+	private readonly factories = new Map<AnyTag, Factory<unknown, TTags>>();
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	private readonly finalizers = new Map<AnyTag, Finalizer<any>>();
+
+	/**
+	 * Registers a dependency with a factory function or lifecycle object.
+	 *
+	 * @param tag - The dependency tag (class or ValueTag)
+	 * @param spec - Factory function or lifecycle object
+	 * @returns The builder with updated type information
+	 */
+	add<T extends AnyTag>(
+		tag: T,
+		spec: DependencySpec<T, TTags>
+	): ContainerBuilder<TTags | T> {
 		if (typeof spec === 'function') {
-			this.factories.set(tag, spec);
+			this.factories.set(tag, spec as Factory<unknown, TTags>);
 			// Remove any existing finalizer when registering with just a factory
 			this.finalizers.delete(tag);
 		} else {
 			// Bind the create method to preserve 'this' context for class instances
-			this.factories.set(tag, spec.create.bind(spec));
-
+			this.factories.set(
+				tag,
+				spec.create.bind(spec) as Factory<unknown, TTags>
+			);
 			if (spec.cleanup) {
 				// Bind the cleanup method to preserve 'this' context for class instances
 				this.finalizers.set(tag, spec.cleanup.bind(spec));
@@ -516,96 +185,187 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 				this.finalizers.delete(tag);
 			}
 		}
-
-		return this as Container<TTags | T>;
+		return this as ContainerBuilder<TTags | T>;
 	}
 
 	/**
-	 * Checks if a dependency has been registered in the container.
-	 *
-	 * This returns `true` if the dependency has been registered via `.register()`,
-	 * regardless of whether it has been instantiated yet.
-	 *
-	 * @param tag - The dependency tag to check
-	 * @returns `true` if the dependency has been registered, `false` otherwise
+	 * Creates an immutable container from the registered dependencies.
+	 */
+	build(): Container<TTags> {
+		return Container._createFromBuilder(this.factories, this.finalizers);
+	}
+}
+
+/**
+ * Type-safe dependency injection container.
+ *
+ * Containers are immutable - use `Container.builder()` to create one.
+ * Each dependency is created once (singleton) and cached.
+ *
+ * @template TTags - Union type of registered dependency tags
+ *
+ * @example
+ * ```typescript
+ * class Database {
+ *   query(sql: string) { return []; }
+ * }
+ *
+ * class UserService {
+ *   constructor(private db: Database) {}
+ *   getUsers() { return this.db.query('SELECT * FROM users'); }
+ * }
+ *
+ * const container = Container.builder()
+ *   .add(Database, () => new Database())
+ *   .add(UserService, async (ctx) =>
+ *     new UserService(await ctx.resolve(Database))
+ *   )
+ *   .build();
+ *
+ * const userService = await container.resolve(UserService);
+ * ```
+ */
+export class Container<
+	TTags extends AnyTag = never,
+> implements IContainer<TTags> {
+	readonly [ContainerTypeId]!: {
+		readonly _TTags: Contravariant<TTags>;
+	};
+
+	/**
+	 * Cache of instantiated dependencies.
+	 * @internal
+	 */
+	protected readonly cache = new Map<AnyTag, Promise<unknown>>();
+
+	/**
+	 * Factory functions for creating dependencies.
+	 * @internal
+	 */
+	protected readonly factories: Map<AnyTag, Factory<unknown, TTags>>;
+
+	/**
+	 * Cleanup functions for dependencies.
+	 * @internal
+	 */
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	protected readonly finalizers: Map<AnyTag, Finalizer<any>>;
+
+	/**
+	 * Whether this container has been destroyed.
+	 * @internal
+	 */
+	protected isDestroyed = false;
+
+	/**
+	 * @internal - Use Container.builder() or Container.empty()
+	 */
+	protected constructor(
+		factories: Map<AnyTag, Factory<unknown, TTags>>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		finalizers: Map<AnyTag, Finalizer<any>>
+	) {
+		this.factories = factories;
+		this.finalizers = finalizers;
+	}
+
+	/**
+	 * @internal - Used by ContainerBuilder
+	 */
+	static _createFromBuilder<T extends AnyTag>(
+		factories: Map<AnyTag, Factory<unknown, T>>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		finalizers: Map<AnyTag, Finalizer<any>>
+	): Container<T> {
+		return new Container(factories, finalizers);
+	}
+
+	/**
+	 * Creates a new container builder.
 	 *
 	 * @example
 	 * ```typescript
-	 * const container = Container.empty().register(DatabaseService, () => new DatabaseService());
-	 * console.log(c.has(DatabaseService)); // true
+	 * const container = Container.builder()
+	 *   .add(Database, () => new Database())
+	 *   .build();
 	 * ```
 	 */
-	has(tag: AnyTag): boolean {
-		return this.factories.has(tag);
+	static builder(): ContainerBuilder {
+		return new ContainerBuilder();
 	}
 
 	/**
-	 * Checks if a dependency has been instantiated (cached) in the container.
+	 * Creates an empty container with no dependencies.
 	 *
-	 * @param tag - The dependency tag to check
-	 * @returns true if the dependency has been instantiated, false otherwise
+	 * Shorthand for `Container.builder().build()`.
 	 */
-	exists(tag: AnyTag): boolean {
-		return this.cache.has(tag);
+	static empty(): Container {
+		return Container.builder().build();
 	}
 
 	/**
-	 * Retrieves a dependency instance from the container, creating it if necessary.
+	 * Creates a scoped container for hierarchical dependency management.
 	 *
-	 * This method ensures singleton behavior - each dependency is created only once
-	 * and cached for subsequent calls. The method is async-safe and handles concurrent
-	 * requests for the same dependency correctly.
+	 * Scoped containers support parent/child relationships where children
+	 * can access parent dependencies but maintain their own cache.
 	 *
-	 * The method performs circular dependency detection by tracking the resolution chain
-	 * through the resolution context.
+	 * @param scope - Identifier for the scope (for debugging)
 	 *
-	 * @template T - The dependency tag type (must be registered in this container)
-	 * @param tag - The dependency tag to retrieve
-	 * @returns Promise resolving to the service instance
-	 * @throws {UnknownDependencyError} If the dependency is not registered
+	 * @example
+	 * ```typescript
+	 * const appContainer = Container.scoped('app');
+	 * // ... add app-level dependencies
+	 *
+	 * const requestContainer = appContainer.child('request');
+	 * // ... add request-specific dependencies
+	 * ```
+	 */
+	static scoped(scope: string | symbol): ScopedContainer {
+		return ScopedContainer.empty(scope);
+	}
+
+	/**
+	 * Creates a container from a layer.
+	 *
+	 * This is a convenience method equivalent to applying a layer to
+	 * `Container.builder()` and building the result.
+	 *
+	 * @param layer - A layer with no requirements (all dependencies satisfied)
+	 *
+	 * @example
+	 * ```typescript
+	 * const dbLayer = Layer.service(Database, []);
+	 * const container = Container.from(dbLayer);
+	 *
+	 * const db = await container.resolve(Database);
+	 * ```
+	 */
+	static from<TProvides extends AnyTag>(
+		layer: Layer<never, TProvides>
+	): Container<TProvides> {
+		const builder = Container.builder();
+		const resultBuilder = layer.apply(builder);
+		return resultBuilder.build();
+	}
+
+	/**
+	 * Resolves a dependency, creating it if necessary.
+	 *
+	 * Dependencies are singletons - the same instance is returned on subsequent calls.
+	 *
+	 * @param tag - The dependency tag to resolve
+	 * @returns Promise resolving to the dependency instance
+	 * @throws {ContainerDestroyedError} If the container has been destroyed
+	 * @throws {UnknownDependencyError} If any dependency is not registered
 	 * @throws {CircularDependencyError} If a circular dependency is detected
-	 * @throws {DependencyCreationError} If the factory function throws an error
-	 *
-	 * @example Basic usage
-	 * ```typescript
-	 * const container = Container.empty()
-	 *   .register(DatabaseService, () => new DatabaseService());
-	 *
-	 * const db = await c.resolve(DatabaseService);
-	 * db.query('SELECT * FROM users');
-	 * ```
-	 *
-	 * @example Concurrent access (singleton behavior)
-	 * ```typescript
-	 * // All three calls will receive the same instance
-	 * const [db1, db2, db3] = await Promise.all([
-	 *   c.resolve(DatabaseService),
-	 *   c.resolve(DatabaseService),
-	 *   c.resolve(DatabaseService)
-	 * ]);
-	 *
-	 * console.log(db1 === db2 === db3); // true
-	 * ```
-	 *
-	 * @example Dependency injection in factories
-	 * ```typescript
-	 * const container = Container.empty()
-	 *   .register(DatabaseService, () => new DatabaseService())
-	 *   .register(UserService, async (ctx) => {
-	 *     const db = await ctx.resolve(DatabaseService);
-	 *     return new UserService(db);
-	 *   });
-	 *
-	 * const userService = await c.resolve(UserService);
-	 * ```
+	 * @throws {DependencyCreationError} If any factory function throws an error
 	 */
 	async resolve<T extends TTags>(tag: T): Promise<TagType<T>> {
 		return this.resolveInternal(tag, []);
 	}
 
 	/**
-	 * Internal resolution method that tracks the dependency chain for circular dependency detection.
-	 * Can be overridden by subclasses (e.g., ScopedContainer) to implement custom resolution logic.
+	 * Internal resolution with dependency chain tracking.
 	 * @internal
 	 */
 	protected resolveInternal<T extends TTags>(
@@ -640,8 +400,8 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 
 		// Create resolution context with updated chain
 		const newChain = [...chain, tag];
-		const context = new ResolutionContextImpl((tag: AnyTag) =>
-			this.resolveInternal(tag as TTags, newChain)
+		const context = new ResolutionContextImpl((t: AnyTag) =>
+			this.resolveInternal(t as TTags, newChain)
 		);
 
 		// Create and cache the promise
@@ -654,7 +414,7 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 				throw new DependencyCreationError(tag, error);
 			}
 		})().catch((error: unknown) => {
-			// Remove failed promise from cache on any error
+			// Remove failed promise from cache
 			this.cache.delete(tag);
 			throw error;
 		});
@@ -667,44 +427,14 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 	}
 
 	/**
-	 * Resolves multiple dependencies concurrently using Promise.all.
+	 * Resolves multiple dependencies concurrently.
 	 *
-	 * This method takes a variable number of dependency tags and resolves all of them concurrently,
-	 * returning a tuple with the resolved instances in the same order as the input tags.
-	 * The method maintains all the same guarantees as the individual resolve method:
-	 * singleton behavior, circular dependency detection, and proper error handling.
-	 *
-	 * @template T - The tuple type of dependency tags to resolve
-	 * @param tags - Variable number of dependency tags to resolve
-	 * @returns Promise resolving to a tuple of service instances in the same order
+	 * @param tags - The dependency tags to resolve
+	 * @returns Promise resolving to a tuple of instances
 	 * @throws {ContainerDestroyedError} If the container has been destroyed
 	 * @throws {UnknownDependencyError} If any dependency is not registered
 	 * @throws {CircularDependencyError} If a circular dependency is detected
 	 * @throws {DependencyCreationError} If any factory function throws an error
-	 *
-	 * @example Basic usage
-	 * ```typescript
-	 * const container = Container.empty()
-	 *   .register(DatabaseService, () => new DatabaseService())
-	 *   .register(LoggerService, () => new LoggerService());
-	 *
-	 * const [db, logger] = await c.resolveAll(DatabaseService, LoggerService);
-	 * ```
-	 *
-	 * @example Mixed tag types
-	 * ```typescript
-	 * const ApiKeyTag = Tag.of('apiKey')<string>();
-	 * const container = Container.empty()
-	 *   .register(ApiKeyTag, () => 'secret-key')
-	 *   .register(UserService, () => new UserService());
-	 *
-	 * const [apiKey, userService] = await c.resolveAll(ApiKeyTag, UserService);
-	 * ```
-	 *
-	 * @example Empty array
-	 * ```typescript
-	 * const results = await c.resolveAll(); // Returns empty array
-	 * ```
 	 */
 	async resolveAll<const T extends readonly TTags[]>(
 		...tags: T
@@ -718,81 +448,53 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 		// Use Promise.all to resolve all dependencies concurrently
 		const promises = tags.map((tag) => this.resolve(tag));
 		const results = await Promise.all(promises);
-
-		// TypeScript knows this is the correct tuple type due to the generic constraint
 		return results as { [K in keyof T]: TagType<T[K]> };
 	}
 
 	/**
-	 * Destroys all instantiated dependencies by calling their finalizers and makes the container unusable.
+	 * Resolves a service, runs the callback with it, then destroys the container.
 	 *
-	 * **Important: After calling destroy(), the container becomes permanently unusable.**
-	 * Any subsequent calls to register(), get(), or destroy() will throw a DependencyFinalizationError.
-	 * This ensures proper cleanup and prevents runtime errors from accessing destroyed resources.
+	 * This is a convenience method for the common "create, use, destroy" pattern.
+	 * The container is always destroyed after the callback completes, even if it throws.
 	 *
-	 * All finalizers for instantiated dependencies are called concurrently using Promise.allSettled()
-	 * for maximum cleanup performance.
-	 * If any finalizers fail, all errors are collected and a DependencyFinalizationError
-	 * is thrown containing details of all failures.
+	 * @param tag - The dependency tag to resolve
+	 * @param fn - Callback that receives the resolved service
+	 * @returns Promise resolving to the callback's return value
+	 * @throws {ContainerDestroyedError} If the container has been destroyed
+	 * @throws {UnknownDependencyError} If the dependency is not registered
+	 * @throws {CircularDependencyError} If a circular dependency is detected
+	 * @throws {DependencyCreationError} If the factory function throws
+	 * @throws {DependencyFinalizationError} If the finalizer function throws
 	 *
-	 * **Finalizer Concurrency:** Finalizers run concurrently, so there are no ordering guarantees.
+	 * @example
+	 * ```typescript
+	 * const result = await container.use(UserService, (service) =>
+	 *   service.getUsers()
+	 * );
+	 * // Container is automatically destroyed after callback completes
+	 * ```
+	 */
+	async use<T extends TTags, R>(
+		tag: T,
+		fn: (service: TagType<T>) => PromiseOrValue<R>
+	): Promise<R> {
+		try {
+			const service = await this.resolve(tag);
+			return await fn(service);
+		} finally {
+			await this.destroy();
+		}
+	}
+
+	/**
+	 * Destroys the container, calling all finalizers.
+	 *
+	 * After destruction, the container cannot be used.
+	 * Finalizers run concurrently, so there are no ordering guarantees.
 	 * Services should be designed to handle cleanup gracefully regardless of the order in which their
 	 * dependencies are cleaned up.
 	 *
-	 * @returns Promise that resolves when all cleanup is complete
-	 * @throws {DependencyFinalizationError} If any finalizers fail during cleanup
-	 *
-	 * @example Basic cleanup
-	 * ```typescript
-	 * const container = Container.empty()
-	 *   .register(DatabaseConnection,
-	 *     async () => {
-	 *       const conn = new DatabaseConnection();
-	 *       await conn.connect();
-	 *       return conn;
-	 *     },
-	 *     (conn) => conn.disconnect() // Finalizer
-	 *   );
-	 *
-	 * const db = await c.resolve(DatabaseConnection);
-	 * await c.destroy(); // Calls conn.disconnect(), container becomes unusable
-	 *
-	 * // This will throw an error
-	 * try {
-	 *   await c.resolve(DatabaseConnection);
-	 * } catch (error) {
-	 *   console.log(error.message); // "Cannot resolve dependencies from a destroyed container"
-	 * }
-	 * ```
-	 *
-	 * @example Application shutdown
-	 * ```typescript
-	 * const appContainer Container.empty
-	 *   .register(DatabaseService, () => new DatabaseService())
-	 *   .register(HTTPServer, async (ctx) => new HTTPServer(await ctx.resolve(DatabaseService)));
-	 *
-	 * // During application shutdown
-	 * process.on('SIGTERM', async () => {
-	 *   try {
-	 *     await appContainer.destroy(); // Clean shutdown of all services
-	 *   } catch (error) {
-	 *     console.error('Error during shutdown:', error);
-	 *   }
-	 *   process.exit(0);
-	 * });
-	 * ```
-	 *
-	 * @example Handling cleanup errors
-	 * ```typescript
-	 * try {
-	 *   await container.destroy();
-	 * } catch (error) {
-	 *   if (error instanceof DependencyContainerFinalizationError) {
-	 *     console.error('Some dependencies failed to clean up:', error.detail.errors);
-	 *   }
-	 * }
-	 * // Container is destroyed regardless of finalizer errors
-	 * ```
+	 * @throws {DependencyFinalizationError} If any finalizers fail
 	 */
 	async destroy(): Promise<void> {
 		if (this.isDestroyed) {
@@ -800,15 +502,7 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 		}
 
 		try {
-			// TODO: Consider adding support for sequential cleanup in the future.
-			// Some use cases (e.g., HTTP server -> services -> database) benefit from
-			// ordered shutdown. Potential approaches:
-			// 1. Add optional `cleanupOrder` parameter to register()
-			// 2. Add `destroySequential()` method as alternative
-			// 3. Support cleanup phases/groups
-			// For now, concurrent cleanup forces better service design and faster shutdown.
 			const promises = Array.from(this.finalizers.entries())
-				// Only finalize dependencies that were actually created
 				.filter(([tag]) => this.cache.has(tag))
 				.map(async ([tag, finalizer]) => {
 					const dep = await this.cache.get(tag);
@@ -817,12 +511,10 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 
 			const results = await Promise.allSettled(promises);
 
-			const failures = results.filter(
-				(result) => result.status === 'rejected'
-			);
+			const failures = results.filter((r) => r.status === 'rejected');
 			if (failures.length > 0) {
 				throw new DependencyFinalizationError(
-					failures.map((result) => result.reason as unknown)
+					failures.map((r) => r.reason as unknown)
 				);
 			}
 		} finally {
@@ -831,6 +523,332 @@ export class Container<TTags extends AnyTag> implements IContainer<TTags> {
 			this.cache.clear();
 			// Note: We keep factories/finalizers for potential debugging,
 			// but the container is no longer usable
+		}
+	}
+}
+
+/**
+ * Scope identifier type.
+ */
+export type Scope = string | symbol;
+
+/**
+ * Builder for constructing scoped containers.
+ *
+ * @template TTags - Union type of registered dependency tags
+ */
+export class ScopedContainerBuilder<TTags extends AnyTag = never> {
+	private readonly factories = new Map<AnyTag, Factory<unknown, TTags>>();
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	private readonly finalizers = new Map<AnyTag, Finalizer<any>>();
+
+	constructor(
+		private readonly scope: Scope,
+		private readonly parent: IContainer<TTags> | null
+	) {}
+
+	/**
+	 * Registers a dependency with a factory function or lifecycle object.
+	 */
+	add<T extends AnyTag>(
+		tag: T,
+		spec: DependencySpec<T, TTags>
+	): ScopedContainerBuilder<TTags | T> {
+		if (typeof spec === 'function') {
+			this.factories.set(tag, spec as Factory<unknown, TTags>);
+			// Remove any existing finalizer when registering with just a factory
+			this.finalizers.delete(tag);
+		} else {
+			// Bind the create method to preserve 'this' context for class instances
+			this.factories.set(
+				tag,
+				spec.create.bind(spec) as Factory<unknown, TTags>
+			);
+			if (spec.cleanup) {
+				// Bind the cleanup method to preserve 'this' context for class instances
+				this.finalizers.set(tag, spec.cleanup.bind(spec));
+			} else {
+				// Remove any existing finalizer when registering with just a factory
+				this.finalizers.delete(tag);
+			}
+		}
+		return this as ScopedContainerBuilder<TTags | T>;
+	}
+
+	/**
+	 * Creates an immutable scoped container from the registered dependencies.
+	 */
+	build(): ScopedContainer<TTags> {
+		const child = ScopedContainer._createScopedFromBuilder(
+			this.scope,
+			this.parent,
+			this.factories,
+			this.finalizers
+		);
+		// Register child with parent for proper destruction order
+		if (this.parent instanceof ScopedContainer) {
+			this.parent._registerChild(child);
+		}
+		return child;
+	}
+}
+
+/**
+ * Scoped container for hierarchical dependency management.
+ *
+ * Supports parent/child relationships where children can access parent
+ * dependencies but maintain their own cache. Useful for request-scoped
+ * dependencies in web applications.
+ *
+ * @template TTags - Union type of registered dependency tags
+ *
+ * @example
+ * ```typescript
+ * // Application-level container
+ * const appContainer = ScopedContainer.builder('app')
+ *   .add(Database, () => new Database())
+ *   .build();
+ *
+ * // Request-level container (inherits from app)
+ * const requestContainer = appContainer.child('request')
+ *   .add(RequestContext, () => new RequestContext())
+ *   .build();
+ *
+ * // Can resolve both app and request dependencies
+ * const db = await requestContainer.resolve(Database);
+ * const ctx = await requestContainer.resolve(RequestContext);
+ * ```
+ */
+// @ts-expect-error - ScopedContainer overrides the empty method
+export class ScopedContainer<
+	TTags extends AnyTag = never,
+> extends Container<TTags> {
+	public readonly scope: Scope;
+	private parent: IContainer<TTags> | null;
+	private readonly children: WeakRef<ScopedContainer<TTags>>[] = [];
+
+	/**
+	 * @internal
+	 */
+	protected constructor(
+		scope: Scope,
+		parent: IContainer<TTags> | null,
+		factories: Map<AnyTag, Factory<unknown, TTags>>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		finalizers: Map<AnyTag, Finalizer<any>>
+	) {
+		super(factories, finalizers);
+		this.scope = scope;
+		this.parent = parent;
+	}
+
+	/**
+	 * @internal - Used by ScopedContainerBuilder
+	 */
+	static _createScopedFromBuilder<T extends AnyTag>(
+		scope: Scope,
+		parent: IContainer<T> | null,
+		factories: Map<AnyTag, Factory<unknown, T>>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		finalizers: Map<AnyTag, Finalizer<any>>
+	): ScopedContainer<T> {
+		return new ScopedContainer(scope, parent, factories, finalizers);
+	}
+
+	/**
+	 * Creates a new scoped container builder.
+	 *
+	 * @param scope - Identifier for the scope (for debugging)
+	 *
+	 * @example
+	 * ```typescript
+	 * const container = ScopedContainer.builder('app')
+	 *   .add(Database, () => new Database())
+	 *   .build();
+	 * ```
+	 */
+	static override builder(scope: Scope): ScopedContainerBuilder {
+		return new ScopedContainerBuilder(scope, null);
+	}
+
+	/**
+	 * Creates an empty scoped container with no dependencies.
+	 */
+	static override empty(scope: Scope): ScopedContainer {
+		return ScopedContainer.builder(scope).build();
+	}
+
+	/**
+	 * Creates a scoped container from a layer.
+	 *
+	 * This is a convenience method equivalent to applying a layer to
+	 * `ScopedContainer.builder()` and building the result.
+	 *
+	 * @param scope - Identifier for the scope (for debugging)
+	 * @param layer - A layer with no requirements (all dependencies satisfied)
+	 *
+	 * @example
+	 * ```typescript
+	 * const dbLayer = Layer.service(Database, []);
+	 * const container = ScopedContainer.from('app', dbLayer);
+	 *
+	 * const db = await container.resolve(Database);
+	 * ```
+	 */
+	static override from<TProvides extends AnyTag>(
+		scope: Scope,
+		layer: Layer<never, TProvides>
+	): ScopedContainer<TProvides> {
+		const builder = ScopedContainer.builder(scope);
+		const resultBuilder = layer.apply(builder);
+		return resultBuilder.build();
+	}
+
+	/**
+	 * Resolves a dependency from this scope or parent scopes, creating it if necessary.
+	 *
+	 * Dependencies are singletons - the same instance is returned on subsequent calls.
+	 *
+	 * @param tag - The dependency tag to resolve
+	 * @returns Promise resolving to the dependency instance
+	 * @throws {ContainerDestroyedError} If the container has been destroyed
+	 * @throws {UnknownDependencyError} If any dependency is not registered
+	 * @throws {CircularDependencyError} If a circular dependency is detected
+	 * @throws {DependencyCreationError} If any factory function throws an error
+	 */
+	override async resolve<T extends TTags>(tag: T): Promise<TagType<T>> {
+		return this.resolveInternal(tag, []);
+	}
+
+	/**
+	 * Internal resolution with parent delegation.
+	 * @internal
+	 */
+	protected override resolveInternal<T extends TTags>(
+		tag: T,
+		chain: AnyTag[]
+	): Promise<TagType<T>> {
+		// If this scope has a factory, resolve here
+		if (this.factories.has(tag)) {
+			return super.resolveInternal(tag, chain);
+		}
+
+		// Delegate to parent
+		if (this.parent !== null) {
+			return this.parent.resolve(tag);
+		}
+
+		throw new UnknownDependencyError(tag);
+	}
+
+	/**
+	 * @internal - Used by ScopedContainerBuilder to register children
+	 */
+	_registerChild(child: ScopedContainer<TTags>): void {
+		this.children.push(new WeakRef(child));
+	}
+
+	/**
+	 * Creates a child container builder that inherits from this container.
+	 *
+	 * Use this to create a child scope and add dependencies to it.
+	 * The child can resolve dependencies from this container.
+	 *
+	 * @param scope - Identifier for the child scope
+	 * @returns A new ScopedContainerBuilder for the child scope
+	 * @throws {ContainerDestroyedError} If the container has been destroyed
+	 *
+	 * @example
+	 * ```typescript
+	 * const requestContainer = appContainer.child('request')
+	 *   .add(RequestContext, () => new RequestContext())
+	 *   .build();
+	 *
+	 * await requestContainer.resolve(Database); // From parent
+	 * await requestContainer.resolve(RequestContext); // From this scope
+	 * ```
+	 */
+	child(scope: Scope): ScopedContainerBuilder<TTags> {
+		if (this.isDestroyed) {
+			throw new ContainerDestroyedError(
+				'Cannot create child containers from a destroyed container'
+			);
+		}
+		return new ScopedContainerBuilder(scope, this);
+	}
+
+	/**
+	 * Creates a child container with a layer applied.
+	 *
+	 * This is a convenience method combining child() + layer.apply() + build().
+	 * Use this when you have a layer ready to apply.
+	 *
+	 * @param scope - Identifier for the child scope
+	 * @param layer - Layer to apply to the child (can require parent's tags)
+	 *
+	 * @example
+	 * ```typescript
+	 * const requestContainer = appContainer.childFrom('request',
+	 *   userService
+	 *     .provide(Layer.value(TenantContext, tenantCtx))
+	 *     .provide(Layer.value(RequestId, requestId))
+	 * );
+	 *
+	 * const users = await requestContainer.resolve(UserService);
+	 * ```
+	 */
+	childFrom<TProvides extends AnyTag>(
+		scope: Scope,
+		layer: Layer<TTags, TProvides>
+	): ScopedContainer<TTags | TProvides> {
+		return layer.apply(this.child(scope)).build();
+	}
+
+	/**
+	 * Destroys this container and all child containers.
+	 *
+	 * Children are destroyed first to ensure proper cleanup order.
+	 *
+	 * After destruction, the container cannot be used.
+	 * Finalizers run concurrently, so there are no ordering guarantees.
+	 * Services should be designed to handle cleanup gracefully regardless of the order in which their
+	 * dependencies are cleaned up.
+	 *
+	 * @throws {DependencyFinalizationError} If any finalizers fail
+	 */
+	override async destroy(): Promise<void> {
+		if (this.isDestroyed) {
+			return; // Already destroyed, nothing to do
+		}
+
+		const allFailures: unknown[] = [];
+
+		// Destroy children first (they may depend on our dependencies)
+		const childDestroyPromises = this.children
+			.map((ref) => ref.deref())
+			.filter(
+				(child): child is ScopedContainer<TTags> => child !== undefined
+			)
+			.map((child) => child.destroy());
+
+		const childResults = await Promise.allSettled(childDestroyPromises);
+
+		const childFailures = childResults
+			.filter((r) => r.status === 'rejected')
+			.map((r) => r.reason as unknown);
+
+		allFailures.push(...childFailures);
+
+		try {
+			await super.destroy();
+		} catch (error) {
+			allFailures.push(error);
+		} finally {
+			this.parent = null;
+		}
+
+		if (allFailures.length > 0) {
+			throw new DependencyFinalizationError(allFailures);
 		}
 	}
 }
