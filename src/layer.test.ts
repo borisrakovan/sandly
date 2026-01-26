@@ -198,6 +198,53 @@ describe('Layer', () => {
 			expect(await container.resolve(StringTag)).toBe('hello');
 			expect(await container.resolve(NumberTag)).toBe(42);
 		});
+
+		it('should work with ServiceTags (pre-instantiated instances)', async () => {
+			class UserService {
+				getUsers() {
+					return [{ id: 1, name: 'Alice' }];
+				}
+			}
+
+			// Create a pre-instantiated instance (useful for testing/mocking)
+			const mockUserService = new UserService();
+
+			const layer = Layer.value(UserService, mockUserService);
+			const container = Container.from(layer);
+
+			const service = await container.resolve(UserService);
+			expect(service).toBe(mockUserService);
+			expect(service.getUsers()).toEqual([{ id: 1, name: 'Alice' }]);
+		});
+
+		it('should work with ServiceTags in layer composition', async () => {
+			class Database {
+				query() {
+					return 'data';
+				}
+			}
+
+			class UserService {
+				constructor(private db: Database) {}
+				getUsers() {
+					return this.db.query();
+				}
+			}
+
+			// Pre-instantiated mock instances
+			const mockDb = new Database();
+			const mockUserService = new UserService(mockDb);
+
+			const testLayer = Layer.value(UserService, mockUserService).provide(
+				Layer.value(Database, mockDb)
+			);
+
+			const container = Container.from(testLayer);
+
+			const service = await container.resolve(UserService);
+			expect(service).toBe(mockUserService);
+			expect(service.getUsers()).toBe('data');
+		});
 	});
 
 	describe('Layer.create()', () => {
@@ -800,6 +847,28 @@ describe('Layer', () => {
 
 			// @ts-expect-error - number is not assignable to string
 			Layer.value(StringTag, 123);
+
+			expect(true).toBe(true);
+		});
+
+		it('should validate ServiceTag types in Layer.value', () => {
+			class UserService {
+				getUsers() {
+					return [];
+				}
+			}
+
+			class Database {
+				query() {
+					return 'data';
+				}
+			}
+
+			// Valid - correct instance type
+			Layer.value(UserService, new UserService());
+
+			// @ts-expect-error - Database instance is not assignable to UserService
+			Layer.value(UserService, new Database());
 
 			expect(true).toBe(true);
 		});

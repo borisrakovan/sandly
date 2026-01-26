@@ -269,11 +269,19 @@ const dbLayer = Layer.service(Database, [], {
 });
 ```
 
-**Layer.value**: Constant values
+**Layer.value**: Constant values or pre-instantiated instances
 
 ```typescript
+// ValueTag (constants)
 const ApiKeyTag = Tag.of('apiKey')<string>();
 const configLayer = Layer.value(ApiKeyTag, process.env.API_KEY!);
+
+// ServiceTag (pre-instantiated instances, useful for testing)
+class UserService {
+  getUsers() { return []; }
+}
+const mockUserService = new UserService();
+const testLayer = Layer.value(UserService, mockUserService);
 ```
 
 **Layer.create**: Custom factory logic

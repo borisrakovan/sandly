@@ -8,7 +8,7 @@ import {
 	ScopedContainer,
 	ScopedContainerBuilder,
 } from './container.js';
-import { AnyTag, ServiceTag, Tag, TagId, TagType, ValueTag } from './tag.js';
+import { AnyTag, ServiceTag, Tag, TagType, ValueTag } from './tag.js';
 import { Contravariant, Covariant } from './types.js';
 
 /**
@@ -380,12 +380,14 @@ export const Layer = {
 	},
 
 	/**
-	 * Creates a layer that provides a constant value.
+	 * Creates a layer that provides a constant value or pre-instantiated instance.
 	 *
-	 * @param tag - The ValueTag to register
-	 * @param value - The value to provide
+	 * Works with both ValueTags (for constants) and ServiceTags (for pre-instantiated instances, useful in tests).
 	 *
-	 * @example
+	 * @param tag - The tag (ValueTag or ServiceTag) to register
+	 * @param value - The value or instance to provide
+	 *
+	 * @example ValueTag (constant)
 	 * ```typescript
 	 * const ApiKeyTag = Tag.of('apiKey')<string>();
 	 * const ConfigTag = Tag.of('config')<{ port: number }>();
@@ -393,11 +395,18 @@ export const Layer = {
 	 * const configLayer = Layer.value(ApiKeyTag, 'secret-key')
 	 *   .merge(Layer.value(ConfigTag, { port: 3000 }));
 	 * ```
+	 *
+	 * @example ServiceTag (pre-instantiated instance, useful for testing)
+	 * ```typescript
+	 * class UserService {
+	 *   getUsers() { return []; }
+	 * }
+	 *
+	 * const mockUserService = new UserService();
+	 * const testLayer = Layer.value(UserService, mockUserService);
+	 * ```
 	 */
-	value<T extends ValueTag<TagId, unknown>>(
-		tag: T,
-		value: TagType<T>
-	): Layer<never, T> {
+	value<T extends AnyTag>(tag: T, value: TagType<T>): Layer<never, T> {
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		return createLayer((builder: any) => {
 			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
