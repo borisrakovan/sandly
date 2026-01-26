@@ -1,5 +1,11 @@
 # sandly
 
+## 2.0.1
+
+### Patch Changes
+
+- 60c9502: Allow Layer.value() to accept ServiceTags with pre-instantiated instances
+
 ## 2.0.0
 
 ### Major Changes
