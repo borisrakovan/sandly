@@ -1,5 +1,11 @@
 # sandly
 
+## 2.1.0
+
+### Minor Changes
+
+- c3f0c91: Introduce Layer.mock() for creating partial mocks in tests
+
 ## 2.0.1
 
 ### Patch Changes
