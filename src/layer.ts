@@ -407,11 +407,69 @@ export const Layer = {
 	 * ```
 	 */
 	value<T extends AnyTag>(tag: T, value: TagType<T>): Layer<never, T> {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		return createLayer((builder: any) => {
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-			return builder.add(tag, () => value);
-		});
+		return createLayer<never, T>(
+			<TBuilder extends IContainerBuilder>(builder: TBuilder) => {
+				return builder.add(tag, () => value) as WithBuilderTags<
+					TBuilder,
+					T
+				>;
+			}
+		);
+	},
+
+	/**
+	 * Creates a layer with a mock implementation for testing.
+	 *
+	 * Similar to `Layer.value()`, but allows partial implementations for ServiceTags,
+	 * making it easier to create test mocks without satisfying constructor dependencies.
+	 *
+	 * **Use this for testing only.** For production code, use `Layer.value()` or `Layer.service()`.
+	 *
+	 * @param tag - The tag (ServiceTag or ValueTag) to register
+	 * @param implementation - The mock implementation (can be partial for ServiceTags)
+	 *
+	 * @example ServiceTag with partial mock
+	 * ```typescript
+	 * class UserService {
+	 *   constructor(private db: Database) {}
+	 *   getUsers() { return this.db.query('SELECT * FROM users'); }
+	 * }
+	 *
+	 * // Mock only the methods you need - no need to satisfy constructor
+	 * const testLayer = Layer.mock(UserService, {
+	 *   getUsers: () => Promise.resolve([{ id: 1, name: 'Alice' }])
+	 * });
+	 * ```
+	 *
+	 * @example ServiceTag with full mock instance
+	 * ```typescript
+	 * const mockUserService = {
+	 *   getUsers: () => Promise.resolve([])
+	 * } as UserService;
+	 *
+	 * const testLayer = Layer.mock(UserService, mockUserService);
+	 * ```
+	 *
+	 * @example ValueTag (works same as Layer.value)
+	 * ```typescript
+	 * const ConfigTag = Tag.of('config')<{ port: number }>();
+	 * const testLayer = Layer.mock(ConfigTag, { port: 3000 });
+	 * ```
+	 */
+	mock<T extends AnyTag>(
+		tag: T,
+		implementation: T extends ServiceTag
+			? Partial<TagType<T>> | TagType<T>
+			: TagType<T>
+	): Layer<never, T> {
+		return createLayer<never, T>(
+			<TBuilder extends IContainerBuilder>(builder: TBuilder) => {
+				return builder.add(
+					tag,
+					() => implementation as TagType<T>
+				) as WithBuilderTags<TBuilder, T>;
+			}
+		);
 	},
 
 	/**

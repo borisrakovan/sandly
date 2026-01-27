@@ -276,12 +276,35 @@ const dbLayer = Layer.service(Database, [], {
 const ApiKeyTag = Tag.of('apiKey')<string>();
 const configLayer = Layer.value(ApiKeyTag, process.env.API_KEY!);
 
-// ServiceTag (pre-instantiated instances, useful for testing)
+// ServiceTag (pre-instantiated instances)
 class UserService {
-  getUsers() { return []; }
+	getUsers() {
+		return [];
+	}
 }
-const mockUserService = new UserService();
-const testLayer = Layer.value(UserService, mockUserService);
+const userService = new UserService();
+const testLayer = Layer.value(UserService, userService);
+```
+
+**Layer.mock**: Partial mocks for testing (ServiceTags only)
+
+```typescript
+class UserService {
+	constructor(private db: Database) {}
+	getUsers() {
+		return this.db.query('SELECT * FROM users');
+	}
+	getUserById(id: number) {
+		return this.db.query(`...`);
+	}
+}
+
+// Mock only the methods you need - no constructor dependencies required
+const testLayer = Layer.mock(UserService, {
+	getUsers: () => Promise.resolve([{ id: 1, name: 'Alice' }]),
+});
+
+// TypeScript still validates the mock's method signatures
 ```
 
 **Layer.create**: Custom factory logic
@@ -453,17 +476,18 @@ try {
 
 ### Layer
 
-| Method                                 | Description                       |
-| -------------------------------------- | --------------------------------- |
-| `Layer.service(class, deps, options?)` | Create layer for a class          |
-| `Layer.value(tag, value)`              | Create layer for a constant value |
-| `Layer.create({ requires, apply })`    | Create custom layer               |
-| `Layer.empty()`                        | Create empty layer                |
-| `Layer.merge(a, b)`                    | Merge two layers                  |
-| `Layer.mergeAll(...layers)`            | Merge multiple layers             |
-| `layer.provide(dep)`                   | Satisfy dependencies              |
-| `layer.provideMerge(dep)`              | Satisfy and merge provisions      |
-| `layer.merge(other)`                   | Merge with another layer          |
+| Method                                 | Description                                     |
+| -------------------------------------- | ----------------------------------------------- |
+| `Layer.service(class, deps, options?)` | Create layer for a class                        |
+| `Layer.value(tag, value)`              | Create layer for a constant value               |
+| `Layer.mock(tag, implementation)`      | Create layer with mock (partial for ServiceTag) |
+| `Layer.create({ requires, apply })`    | Create custom layer                             |
+| `Layer.empty()`                        | Create empty layer                              |
+| `Layer.merge(a, b)`                    | Merge two layers                                |
+| `Layer.mergeAll(...layers)`            | Merge multiple layers                           |
+| `layer.provide(dep)`                   | Satisfy dependencies                            |
+| `layer.provideMerge(dep)`              | Satisfy and merge provisions                    |
+| `layer.merge(other)`                   | Merge with another layer                        |
 
 ### ScopedContainer
 
@@ -482,6 +506,57 @@ try {
 | `Tag.of(id)<T>()`  | Create a ValueTag           |
 | `Tag.id(tag)`      | Get tag's string identifier |
 | `Tag.isTag(value)` | Check if value is a tag     |
+
+## Testing
+
+Sandly makes testing easy with `Layer.mock()`, which allows you to create partial mocks without satisfying constructor dependencies. Import your production layers and override dependencies with mocks:
+
+```typescript
+// Production code (e.g., src/services/user-service.ts)
+import { Layer } from 'sandly';
+import { ResourcesRepository } from '../repositories/resources-repository';
+
+export class UserService {
+	constructor(private repo: ResourcesRepository) {}
+	async getUsers() {
+		return this.repo.listByCrawlId('crawl-123');
+	}
+}
+
+// Layer definition in the same file
+export const userServiceLayer = Layer.service(UserService, [
+	ResourcesRepository,
+]);
+
+// Test file (e.g., src/services/user-service.test.ts)
+import { Container, Layer } from 'sandly';
+import { userServiceLayer } from './user-service';
+import { ResourcesRepository } from '../repositories/resources-repository';
+
+// Override production dependencies with mocks
+const testLayer = userServiceLayer.provide(
+	Layer.mock(ResourcesRepository, {
+		listByCrawlId: async () => [
+			{ id: '1', name: 'Alice' },
+			{ id: '2', name: 'Bob' },
+		],
+	})
+);
+
+const container = Container.from(testLayer);
+const userService = await container.resolve(UserService);
+
+// Use the service - mock is automatically injected
+const users = await userService.getUsers();
+expect(users).toHaveLength(2);
+```
+
+**Benefits:**
+
+- ✅ No need to satisfy constructor dependencies for mocks
+- ✅ TypeScript validates mock method signatures
+- ✅ Works seamlessly with `Layer.service()` composition
+- ✅ Clear intent: `mock()` for tests, `value()` for production
 
 ## Comparison with Alternatives
 
