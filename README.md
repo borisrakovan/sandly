@@ -1,5 +1,13 @@
 # Sandly
 
+[![npm version](https://img.shields.io/npm/v/sandly?color=3178c6&label=npm)](https://www.npmjs.com/package/sandly)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/sandly)](https://bundlephobia.com/package/sandly)
+[![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://bundlephobia.com/package/sandly)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![CI](https://github.com/borisrakovan/sandly/actions/workflows/ci.yml/badge.svg)](https://github.com/borisrakovan/sandly/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/borisrakovan/sandly)](https://github.com/borisrakovan/sandly/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/borisrakovan/sandly?style=social)](https://github.com/borisrakovan/sandly)
+
 Sandly ("Services And Layers") is a type-safe dependency injection library for TypeScript. No decorators, no runtime reflection, just compile-time safety that catches errors before your code runs.
 
 ## Why Sandly?
