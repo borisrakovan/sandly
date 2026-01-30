@@ -1,14 +1,24 @@
-# Sandly
+<p align="center">
+  <img src="docs/assets/logo.jpeg" alt="Sandly Logo" width="180" />
+</p>
 
-[![npm version](https://img.shields.io/npm/v/sandly?color=3178c6&label=npm)](https://www.npmjs.com/package/sandly)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/sandly)](https://bundlephobia.com/package/sandly)
-[![zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](https://bundlephobia.com/package/sandly)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![CI](https://github.com/borisrakovan/sandly/actions/workflows/ci.yml/badge.svg)](https://github.com/borisrakovan/sandly/actions/workflows/ci.yml)
-[![license](https://img.shields.io/github/license/borisrakovan/sandly)](https://github.com/borisrakovan/sandly/blob/main/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/borisrakovan/sandly?style=social)](https://github.com/borisrakovan/sandly)
+<h1 align="center">Sandly</h1>
 
-Sandly ("Services And Layers") is a type-safe dependency injection library for TypeScript. No decorators, no runtime reflection, just compile-time safety that catches errors before your code runs.
+<p align="center">
+  <a href="https://www.npmjs.com/package/sandly"><img src="https://img.shields.io/npm/v/sandly?color=3178c6&label=npm" alt="npm version"></a>
+  <a href="https://bundlephobia.com/package/sandly"><img src="https://img.shields.io/bundlephobia/minzip/sandly" alt="bundle size"></a>
+  <a href="https://bundlephobia.com/package/sandly"><img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="zero dependencies"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.0%2B-blue?logo=typescript&logoColor=white" alt="TypeScript"></a>
+  <br />
+  <a href="https://github.com/borisrakovan/sandly/actions/workflows/ci.yml"><img src="https://github.com/borisrakovan/sandly/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/borisrakovan/sandly/blob/main/LICENSE"><img src="https://img.shields.io/github/license/borisrakovan/sandly" alt="license"></a>
+  <a href="https://github.com/borisrakovan/sandly"><img src="https://img.shields.io/github/stars/borisrakovan/sandly?style=social" alt="GitHub stars"></a>
+</p>
+
+<p align="center">
+  <strong>Type-safe dependency injection for TypeScript.</strong><br />
+  No decorators, no runtime reflection — just compile-time safety.
+</p>
 
 ## Why Sandly?
 
