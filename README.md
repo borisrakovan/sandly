@@ -52,6 +52,7 @@ const orders = await container.resolve(OrderService);
 
 - **Compile-time safety**: TypeScript catches missing dependencies before runtime
 - **No decorators**: Works with standard TypeScript, no experimental features
+- **Inject anything**: Classes, objects, primitives, or functions
 - **Async support**: Factories and cleanup functions can be async
 - **Composable layers**: Organize dependencies into reusable modules
 - **Scoped containers**: Hierarchical dependency management for web servers
