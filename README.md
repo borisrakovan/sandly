@@ -11,8 +11,7 @@
 </p>
 
 <p align="center">
-  <strong>Type-safe dependency injection for TypeScript.</strong><br />
-  No decorators, no runtime reflection — just compile-time safety.
+  Type-safe dependency injection for TypeScript, without decorators or reflection.
 </p>
 
 ## Why Sandly?
