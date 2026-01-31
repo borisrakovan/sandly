@@ -49,6 +49,7 @@
 		"lint:check": "eslint . --max-warnings=0",
 		"type:check": "tsc --noEmit",
 		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"tag": "git tag v$(node -p \"require('./package.json').version\") && git push --tags",
 		"release": "changeset version && changeset publish"
 	},
@@ -56,6 +57,7 @@
 		"@changesets/cli": "^2.29.5",
 		"@eslint/js": "^9.26.0",
 		"@types/node": "^22.15.3",
+		"@vitest/coverage-v8": "^3.2.4",
 		"eslint": "^9.26.0",
 		"prettier": "^3.5.3",
 		"prettier-plugin-organize-imports": "^4.1.0",

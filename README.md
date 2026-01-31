@@ -1,14 +1,9 @@
-<p align="center">
-  <img src="docs/assets/logo.png" alt="Sandly Logo" width="500" />
-</p>
-
 <h1 align="center">Sandly</h1>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/sandly"><img src="https://img.shields.io/npm/v/sandly?color=3178c6&label=npm" alt="npm version"></a>
-  <a href="https://bundlephobia.com/package/sandly"><img src="https://img.shields.io/bundlephobia/minzip/sandly" alt="bundle size"></a>
-  <a href="https://bundlephobia.com/package/sandly"><img src="https://img.shields.io/badge/dependencies-0-brightgreen" alt="zero dependencies"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.0%2B-blue?logo=typescript&logoColor=white" alt="TypeScript"></a>
+  <a href="https://codecov.io/gh/borisrakovan/sandly"><img src="https://codecov.io/gh/borisrakovan/sandly/branch/main/graph/badge.svg" alt="coverage"></a>
   <br />
   <a href="https://github.com/borisrakovan/sandly/actions/workflows/ci.yml"><img src="https://github.com/borisrakovan/sandly/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/borisrakovan/sandly/blob/main/LICENSE"><img src="https://img.shields.io/github/license/borisrakovan/sandly" alt="license"></a>

@@ -38,8 +38,15 @@ jobs:
       - name: Type check
         run: pnpm run type:check
 
-      - name: Test
-        run: pnpm test
+      - name: Test with coverage
+        run: pnpm run test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/coverage-final.json
+          fail_ci_if_error: false
 
       - name: Build
         run: pnpm run build

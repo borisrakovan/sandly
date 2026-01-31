@@ -30,6 +30,9 @@ Desktop.ini
 
 **/dist/
 
+# test coverage
+coverage/
+
 # node_module directories
 **/node_modules/*
 
