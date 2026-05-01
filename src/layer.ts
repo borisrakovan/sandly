@@ -144,6 +144,9 @@ export interface Layer<TRequires extends AnyTag, TProvides extends AnyTag> {
 	 * Provides a dependency layer to this layer, creating a pipeline.
 	 * The result only exposes this layer's provisions (not the dependency's).
 	 *
+	 * Requirements satisfied internally (by either layer's provisions) are
+	 * subtracted from the result's requirements.
+	 *
 	 * @example
 	 * ```typescript
 	 * const appLayer = apiLayer
@@ -153,37 +156,35 @@ export interface Layer<TRequires extends AnyTag, TProvides extends AnyTag> {
 	 */
 	provide: <TDepRequires extends AnyTag, TDepProvides extends AnyTag>(
 		dependency: Layer<TDepRequires, TDepProvides>
-	) => Layer<TDepRequires | Exclude<TRequires, TDepProvides>, TProvides>;
-
-	/**
-	 * Provides a dependency layer and merges both layers' provisions.
-	 * Unlike `.provide()`, this exposes both this layer's and the dependency's provisions.
-	 *
-	 * @example
-	 * ```typescript
-	 * const infraLayer = dbLayer.provideMerge(configLayer);
-	 * // Provides both Database and Config
-	 * ```
-	 */
-	provideMerge: <TDepRequires extends AnyTag, TDepProvides extends AnyTag>(
-		dependency: Layer<TDepRequires, TDepProvides>
 	) => Layer<
-		TDepRequires | Exclude<TRequires, TDepProvides>,
-		TProvides | TDepProvides
+		Exclude<TRequires | TDepRequires, TProvides | TDepProvides>,
+		TProvides
 	>;
 
 	/**
-	 * Merges this layer with another independent layer.
-	 * Combines their requirements and provisions.
+	 * Merges this layer with another layer, exposing both layers' provisions.
+	 *
+	 * Requirements satisfied internally (by either layer's provisions) are
+	 * subtracted from the result's requirements. This means a merge of two
+	 * layers where one provides what the other requires produces a layer with
+	 * those requirements already satisfied.
 	 *
 	 * @example
 	 * ```typescript
+	 * // Independent layers
 	 * const infraLayer = persistenceLayer.merge(loggingLayer);
+	 *
+	 * // Self-satisfying merge: dbLayer requires Config, configLayer provides it
+	 * const fullInfra = dbLayer.merge(configLayer);
+	 * // Result: requires nothing, provides Database | Config
 	 * ```
 	 */
 	merge: <TOtherRequires extends AnyTag, TOtherProvides extends AnyTag>(
 		other: Layer<TOtherRequires, TOtherProvides>
-	) => Layer<TRequires | TOtherRequires, TProvides | TOtherProvides>;
+	) => Layer<
+		Exclude<TRequires | TOtherRequires, TProvides | TOtherProvides>,
+		TProvides | TOtherProvides
+	>;
 }
 
 /**
@@ -202,10 +203,6 @@ function createLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
 			return createProvidedLayer(dependency, layerImpl);
 		},
 
-		provideMerge(dependency) {
-			return createComposedLayer(dependency, layerImpl);
-		},
-
 		merge(other) {
 			return createMergedLayer(layerImpl, other);
 		},
@@ -215,6 +212,10 @@ function createLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
 
 /**
  * Creates a layer that only exposes the target's provisions.
+ *
+ * Runtime is identical to merge: both layers' factories are added to the
+ * builder, and resolutions across them work transparently. Only the result
+ * type narrows provisions to the target's.
  * @internal
  */
 function createProvidedLayer<
@@ -225,51 +226,23 @@ function createProvidedLayer<
 >(
 	dependency: Layer<TDepRequires, TDepProvides>,
 	target: Layer<TRequires, TProvides>
-): Layer<TDepRequires | Exclude<TRequires, TDepProvides>, TProvides> {
-	// Implementation is the same as provideMerge, we only narrow the return type
-	return createComposedLayer(dependency, target) as Layer<
-		TDepRequires | Exclude<TRequires, TDepProvides>,
+): Layer<
+	Exclude<TRequires | TDepRequires, TProvides | TDepProvides>,
+	TProvides
+> {
+	return createMergedLayer(dependency, target) as Layer<
+		Exclude<TRequires | TDepRequires, TProvides | TDepProvides>,
 		TProvides
 	>;
 }
 
 /**
- * Creates a composed layer that exposes both layers' provisions.
- * @internal
- */
-function createComposedLayer<
-	TDepRequires extends AnyTag,
-	TDepProvides extends AnyTag,
-	TRequires extends AnyTag,
-	TProvides extends AnyTag,
->(
-	dependency: Layer<TDepRequires, TDepProvides>,
-	target: Layer<TRequires, TProvides>
-): Layer<
-	TDepRequires | Exclude<TRequires, TDepProvides>,
-	TDepProvides | TProvides
-> {
-	return {
-		apply: (builder) => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const withDep = dependency.apply(builder as any);
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
-			return target.apply(withDep as any) as any;
-		},
-		provide(dep) {
-			return createProvidedLayer(dep, this);
-		},
-		provideMerge(dep) {
-			return createComposedLayer(dep, this);
-		},
-		merge(other) {
-			return createMergedLayer(this, other);
-		},
-	};
-}
-
-/**
- * Creates a merged layer from two independent layers.
+ * Creates a merged layer from two layers, exposing both layers' provisions.
+ *
+ * Requirements satisfied internally (by either layer's provisions) are
+ * subtracted from the result's requirements at the type level. The runtime
+ * behavior is unchanged - both layers' factories are added to the builder
+ * and resolutions are wired transparently in either direction.
  * @internal
  */
 function createMergedLayer<
@@ -280,8 +253,13 @@ function createMergedLayer<
 >(
 	layer1: Layer<TRequires1, TProvides1>,
 	layer2: Layer<TRequires2, TProvides2>
-): Layer<TRequires1 | TRequires2, TProvides1 | TProvides2> {
-	return {
+): Layer<
+	Exclude<TRequires1 | TRequires2, TProvides1 | TProvides2>,
+	TProvides1 | TProvides2
+> {
+	type TR = Exclude<TRequires1 | TRequires2, TProvides1 | TProvides2>;
+	type TP = TProvides1 | TProvides2;
+	const merged: Layer<TR, TP> = {
 		apply: (builder) => {
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const with1 = layer1.apply(builder as any);
@@ -289,15 +267,13 @@ function createMergedLayer<
 			return layer2.apply(with1 as any) as any;
 		},
 		provide(dep) {
-			return createProvidedLayer(dep, this);
-		},
-		provideMerge(dep) {
-			return createComposedLayer(dep, this);
+			return createProvidedLayer(dep, merged);
 		},
 		merge(other) {
-			return createMergedLayer(this, other);
+			return createMergedLayer(merged, other);
 		},
 	};
+	return merged;
 }
 
 /**
@@ -523,9 +499,6 @@ export const Layer = {
 			provide(dep) {
 				return createProvidedLayer(dep, layer);
 			},
-			provideMerge(dep) {
-				return createComposedLayer(dep, layer);
-			},
 			merge(other) {
 				return createMergedLayer(layer, other);
 			},
@@ -551,8 +524,11 @@ export const Layer = {
 	/**
 	 * Merges multiple layers at once.
 	 *
+	 * Requirements satisfied internally (by any merged layer's provisions)
+	 * are subtracted from the result's requirements.
+	 *
 	 * @param layers - At least 2 layers to merge
-	 * @returns A layer combining all requirements and provisions
+	 * @returns A layer combining all provisions, with internally-satisfied requirements removed
 	 *
 	 * @example
 	 * ```typescript
@@ -565,9 +541,12 @@ export const Layer = {
 	 */
 	mergeAll<T extends readonly [AnyLayer, AnyLayer, ...AnyLayer[]]>(
 		...layers: T
-	): Layer<UnionOfRequires<T>, UnionOfProvides<T>> {
+	): Layer<
+		Exclude<UnionOfRequires<T>, UnionOfProvides<T>>,
+		UnionOfProvides<T>
+	> {
 		return layers.reduce((acc, layer) => acc.merge(layer)) as Layer<
-			UnionOfRequires<T>,
+			Exclude<UnionOfRequires<T>, UnionOfProvides<T>>,
 			UnionOfProvides<T>
 		>;
 	},
@@ -584,7 +563,10 @@ export const Layer = {
 	>(
 		layer1: Layer<TRequires1, TProvides1>,
 		layer2: Layer<TRequires2, TProvides2>
-	): Layer<TRequires1 | TRequires2, TProvides1 | TProvides2> {
+	): Layer<
+		Exclude<TRequires1 | TRequires2, TProvides1 | TProvides2>,
+		TProvides1 | TProvides2
+	> {
 		return layer1.merge(layer2);
 	},
 };

@@ -196,19 +196,23 @@ const cacheLayer = Layer.create({
 });
 ```
 
-Compose layers with `provide()`, `provideMerge()`, and `merge()`:
+Compose layers with `provide()` and `merge()`:
 
 ```typescript
 // provide: satisfy dependencies, expose only this layer's provisions
 const appLayer = userLayer.provide(dbLayer);
 
-// merge: combine independent layers
-const infraLayer = Layer.merge(dbLayer, loggerLayer);
-// or
-const infraLayer = Layer.mergeAll(dbLayer, loggerLayer, cacheLayer);
+// merge: combine layers, exposing both provisions. Internally satisfied
+// requirements are subtracted from the result's requirements.
+const infraLayer = dbLayer.merge(loggerLayer);
 
-// provideMerge: satisfy dependencies and expose both layers
-const fullLayer = userLayer.provideMerge(dbLayer);
+// merge wires dependencies in either direction. dbLayer requires Config and
+// configLayer provides it - the result has no outstanding requirements.
+const fullInfra = dbLayer.merge(configLayer);
+
+// Static helpers for two or more layers
+const appInfra = Layer.merge(dbLayer, loggerLayer);
+const infra = Layer.mergeAll(dbLayer, loggerLayer, cacheLayer);
 ```
 
 ### Scoped Containers
@@ -496,11 +500,10 @@ try {
 | `Layer.mock(tag, implementation)`      | Create layer with mock (partial for ServiceTag) |
 | `Layer.create({ requires, apply })`    | Create custom layer                             |
 | `Layer.empty()`                        | Create empty layer                              |
-| `Layer.merge(a, b)`                    | Merge two layers                                |
-| `Layer.mergeAll(...layers)`            | Merge multiple layers                           |
-| `layer.provide(dep)`                   | Satisfy dependencies                            |
-| `layer.provideMerge(dep)`              | Satisfy and merge provisions                    |
-| `layer.merge(other)`                   | Merge with another layer                        |
+| `Layer.merge(a, b)`                    | Merge two layers (smart subtraction)            |
+| `Layer.mergeAll(...layers)`            | Merge multiple layers (smart subtraction)       |
+| `layer.provide(dep)`                   | Satisfy dependencies, expose only target's      |
+| `layer.merge(other)`                   | Merge layers, expose both, subtract satisfied   |
 
 ### ScopedContainer
 

@@ -545,35 +545,6 @@ describe('Layer', () => {
 		});
 	});
 
-	describe('provideMerge()', () => {
-		it('should expose both layers provisions', async () => {
-			class Config {
-				port = 3000;
-			}
-			class Database {
-				constructor(private config: Config) {}
-				getPort() {
-					return this.config.port;
-				}
-			}
-
-			const configLayer = Layer.service(Config, []);
-			const dbLayer = Layer.service(Database, [Config]);
-
-			// provideMerge exposes both Config and Database
-			const infraLayer = dbLayer.provideMerge(configLayer);
-
-			const container = Container.from(infraLayer);
-
-			// Both should be resolvable
-			const config = await container.resolve(Config);
-			const db = await container.resolve(Database);
-
-			expect(config.port).toBe(3000);
-			expect(db.getPort()).toBe(3000);
-		});
-	});
-
 	describe('merge()', () => {
 		it('should combine independent layers', async () => {
 			class Database {}
@@ -616,6 +587,56 @@ describe('Layer', () => {
 
 			expect(await container.resolve(Database)).toBeInstanceOf(Database);
 			expect(await container.resolve(Cache)).toBeInstanceOf(Cache);
+		});
+
+		it('should subtract internally satisfied requirements (smart-merge)', async () => {
+			class Config {
+				port = 3000;
+			}
+			class Database {
+				constructor(private config: Config) {}
+				getPort() {
+					return this.config.port;
+				}
+			}
+
+			const configLayer = Layer.service(Config, []);
+			const dbLayer = Layer.service(Database, [Config]);
+
+			// dbLayer requires Config; configLayer provides it.
+			// merge wires them automatically and exposes both provisions.
+			const infraLayer = dbLayer.merge(configLayer);
+
+			const container = Container.from(infraLayer);
+
+			const config = await container.resolve(Config);
+			const db = await container.resolve(Database);
+
+			expect(config.port).toBe(3000);
+			expect(db.getPort()).toBe(3000);
+		});
+
+		it('should wire dependencies regardless of merge order', async () => {
+			class Config {
+				port = 3000;
+			}
+			class Database {
+				constructor(private config: Config) {}
+				getPort() {
+					return this.config.port;
+				}
+			}
+
+			const configLayer = Layer.service(Config, []);
+			const dbLayer = Layer.service(Database, [Config]);
+
+			// Same as above but with arguments reversed - smart-merge is order-agnostic
+			const infraLayer = configLayer.merge(dbLayer);
+
+			const container = Container.from(infraLayer);
+			const db = await container.resolve(Database);
+
+			expect(db.getPort()).toBe(3000);
 		});
 	});
 
@@ -1173,6 +1194,110 @@ describe('Layer', () => {
 			expectTypeOf(merged).toEqualTypeOf<
 				Layer<never, typeof A | typeof B>
 			>();
+		});
+
+		it('should subtract internally satisfied requirements at the type level (smart-merge)', () => {
+			class A {
+				a(): string {
+					return 'a';
+				}
+			}
+			class B {
+				constructor(private _a: A) {}
+				b(): string {
+					return 'b';
+				}
+			}
+
+			const aLayer = Layer.service(A, []);
+			const bLayer = Layer.service(B, [A]);
+
+			// bLayer requires A; aLayer provides A.
+			// merge subtracts A from requirements; provides both.
+			const merged = bLayer.merge(aLayer);
+			expectTypeOf(merged).toEqualTypeOf<
+				Layer<never, typeof A | typeof B>
+			>();
+
+			// Order-independent at the type level
+			const mergedReverse = aLayer.merge(bLayer);
+			expectTypeOf(mergedReverse).toEqualTypeOf<
+				Layer<never, typeof A | typeof B>
+			>();
+		});
+
+		it('should keep unsatisfied requirements after merge', () => {
+			class A {
+				a(): string {
+					return 'a';
+				}
+			}
+			class B {
+				b(): string {
+					return 'b';
+				}
+			}
+			class C {
+				constructor(
+					private _a: A,
+					private _b: B
+				) {}
+				c(): string {
+					return 'c';
+				}
+			}
+
+			const aLayer = Layer.service(A, []);
+			const cLayer = Layer.service(C, [A, B]);
+
+			// cLayer requires A | B; aLayer provides A.
+			// After merge: B remains as a requirement, A and C are provided.
+			const merged = aLayer.merge(cLayer);
+			expectTypeOf(merged).toEqualTypeOf<
+				Layer<typeof B, typeof A | typeof C>
+			>();
+		});
+
+		it('should subtract internally satisfied requirements via Layer.mergeAll', () => {
+			class Config {
+				port = 0;
+			}
+			class Database {
+				constructor(private _config: Config) {}
+			}
+			class Cache {
+				constructor(private _config: Config) {}
+			}
+
+			const configLayer = Layer.service(Config, []);
+			const dbLayer = Layer.service(Database, [Config]);
+			const cacheLayer = Layer.service(Cache, [Config]);
+
+			const merged = Layer.mergeAll(configLayer, dbLayer, cacheLayer);
+			expectTypeOf(merged).toEqualTypeOf<
+				Layer<never, typeof Config | typeof Database | typeof Cache>
+			>();
+		});
+
+		it('should subtract requirements both ways in provide', () => {
+			class A {
+				a(): string {
+					return 'a';
+				}
+			}
+			class B {
+				constructor(private _a: A) {}
+				b(): string {
+					return 'b';
+				}
+			}
+
+			const aLayer = Layer.service(A, []);
+			const bLayer = Layer.service(B, [A]);
+
+			// provide narrows provisions to target only.
+			const composed = bLayer.provide(aLayer);
+			expectTypeOf(composed).toEqualTypeOf<Layer<never, typeof B>>();
 		});
 
 		it('should infer correct ScopedContainer type', () => {
