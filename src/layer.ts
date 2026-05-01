@@ -45,11 +45,20 @@ export type WithBuilderTags<
  * - A ServiceTag (class) whose instances are assignable to T
  * - A ValueTag whose value type is assignable to T
  * - A raw value of type T
+ *
+ * The conditional uses `[T] extends [object]` (tuple-wrapped) to prevent
+ * distribution over union types. Without this, a parameter typed as a
+ * string union (e.g. `'SANDBOX' | 'PRODUCTION'`) would distribute into
+ * `ValueTag<any, 'SANDBOX'> | ValueTag<any, 'PRODUCTION'>`, and a
+ * `ValueTag<any, 'SANDBOX' | 'PRODUCTION'>` would not be assignable to
+ * either branch (ValueTag is invariant in its value parameter).
  * @internal
  */
 type ValidDepFor<T> =
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	| (T extends object ? ServiceTag<T> | ValueTag<any, T> : ValueTag<any, T>)
+	| ([T] extends [object]
+			? ServiceTag<T> | ValueTag<any, T>
+			: ValueTag<any, T>)
 	| T;
 
 /**

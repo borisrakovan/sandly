@@ -901,6 +901,45 @@ describe('Layer', () => {
 			expect(true).toBe(true);
 		});
 
+		it('should accept a ValueTag whose value type is a string union (no naked-conditional distribution)', async () => {
+			// Regression test: previously `T extends object ? ... : ValueTag<any, T>`
+			// distributed over `T = 'SANDBOX' | 'PRODUCTION'`, producing
+			// `ValueTag<any, 'SANDBOX'> | ValueTag<any, 'PRODUCTION'>`. Since
+			// ValueTag is invariant in its value parameter, the union-typed tag
+			// would not be assignable to either branch. Wrapping in a tuple
+			// (`[T] extends [object]`) prevents distribution.
+			type Environment = 'SANDBOX' | 'PRODUCTION';
+			const EnvironmentTag = Tag.of('Environment')<Environment>();
+
+			class EnvAwareService {
+				constructor(private env: Environment) {}
+				current(): Environment {
+					return this.env;
+				}
+			}
+
+			// This should compile without error.
+			const layer = Layer.service(EnvAwareService, [
+				EnvironmentTag,
+			]).provide(Layer.value(EnvironmentTag, 'SANDBOX'));
+
+			const container = Container.from(layer);
+			const service = await container.resolve(EnvAwareService);
+			expect(service.current()).toBe('SANDBOX');
+		});
+
+		it('should accept a ValueTag whose value type is a primitive union', () => {
+			const FlagTag = Tag.of('flag')<string | number>();
+
+			class FlagConsumer {
+				constructor(private _flag: string | number) {}
+			}
+
+			// Should compile without error.
+			Layer.service(FlagConsumer, [FlagTag]);
+			expect(true).toBe(true);
+		});
+
 		it('should reject wrong type in deps array', () => {
 			// Classes must have properties/methods - empty classes are structurally
 			// equivalent to {} and accept primitives in TypeScript
