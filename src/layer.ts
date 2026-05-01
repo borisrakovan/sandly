@@ -54,12 +54,13 @@ export type WithBuilderTags<
  * either branch (ValueTag is invariant in its value parameter).
  * @internal
  */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 type ValidDepFor<T> =
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	| ([T] extends [object]
 			? ServiceTag<T> | ValueTag<any, T>
 			: ValueTag<any, T>)
 	| T;
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * Maps constructor parameters to valid dependency types.
