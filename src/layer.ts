@@ -42,22 +42,26 @@ export type WithBuilderTags<
 /**
  * Defines what constitutes a valid dependency for a given parameter type T.
  * A valid dependency is either:
- * - A ServiceTag (class) whose instances are assignable to T
+ * - A ServiceTag (class) whose non-null instances are assignable to T
  * - A ValueTag whose value type is assignable to T
  * - A raw value of type T
  *
- * The conditional uses `[T] extends [object]` (tuple-wrapped) to prevent
- * distribution over union types. Without this, a parameter typed as a
- * string union (e.g. `'SANDBOX' | 'PRODUCTION'`) would distribute into
+ * The conditional uses `[NonNullable<T>] extends [object]` (tuple-wrapped)
+ * to prevent distribution over union types while still allowing
+ * `ServiceTag<NonNullable<T>>` for nullable service params (e.g.
+ * `Cache | null`). Without the tuple wrap, a parameter typed as a string
+ * union (e.g. `'SANDBOX' | 'PRODUCTION'`) would distribute into
  * `ValueTag<any, 'SANDBOX'> | ValueTag<any, 'PRODUCTION'>`, and a
  * `ValueTag<any, 'SANDBOX' | 'PRODUCTION'>` would not be assignable to
- * either branch (ValueTag is invariant in its value parameter).
+ * either branch (ValueTag is invariant in its value parameter). Without
+ * the `NonNullable<T>` stripping, a nullable class param would skip the
+ * object branch entirely and reject `ServiceTag` dependencies.
  * @internal
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type ValidDepFor<T> =
-	| ([T] extends [object]
-			? ServiceTag<T> | ValueTag<any, T>
+	| ([NonNullable<T>] extends [object]
+			? ServiceTag<NonNullable<T>> | ValueTag<any, T>
 			: ValueTag<any, T>)
 	| T;
 /* eslint-enable @typescript-eslint/no-explicit-any */

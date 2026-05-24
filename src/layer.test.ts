@@ -940,6 +940,42 @@ describe('Layer', () => {
 			expect(true).toBe(true);
 		});
 
+		it('should accept a ServiceTag for a nullable class parameter', async () => {
+			// Regression test: when a constructor parameter is typed as a
+			// nullable class (e.g. `Cache | null`), `[T] extends [object]`
+			// evaluates to `false` because `null`/`undefined` aren't `object`.
+			// `ValidDepFor` now strips nullability via `NonNullable<T>` before
+			// the object check, so the `ServiceTag` branch still applies.
+			class Cache {
+				get(key: string): string {
+					return `cached:${key}`;
+				}
+			}
+
+			class CachedService {
+				constructor(
+					private name: string,
+					private cache: Cache | null = null
+				) {}
+				lookup(): string {
+					return (
+						this.cache?.get(this.name) ?? `no-cache:${this.name}`
+					);
+				}
+			}
+
+			// Passing the class as a ServiceTag must compile, even though the
+			// declared parameter type is `Cache | null`.
+			const layer = Layer.service(CachedService, [
+				'hello',
+				Cache,
+			]).provide(Layer.service(Cache, []));
+
+			const container = Container.from(layer);
+			const service = await container.resolve(CachedService);
+			expect(service.lookup()).toBe('cached:hello');
+		});
+
 		it('should reject wrong type in deps array', () => {
 			// Classes must have properties/methods - empty classes are structurally
 			// equivalent to {} and accept primitives in TypeScript
