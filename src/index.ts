@@ -24,8 +24,12 @@ export {
 	ContainerDestroyedError,
 	DependencyCreationError,
 	DependencyFinalizationError,
+	DuplicateOverrideError,
+	DuplicateProviderError,
+	OverrideTargetNotFoundError,
 	SandlyError,
 	UnknownDependencyError,
+	UnusedDependencyResolvedError,
 } from './errors.js';
 export type { ErrorDump } from './errors.js';
 

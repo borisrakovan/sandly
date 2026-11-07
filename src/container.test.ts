@@ -11,6 +11,7 @@ import {
 	ContainerDestroyedError,
 	DependencyCreationError,
 	DependencyFinalizationError,
+	DuplicateProviderError,
 	UnknownDependencyError,
 } from './errors.js';
 import { Layer } from './layer.js';
@@ -66,18 +67,19 @@ describe('Container', () => {
 			expect(c).toBeInstanceOf(ServiceC);
 		});
 
-		it('should allow overriding registrations in builder', async () => {
+		it('should reject a second registration of the same tag', () => {
 			class TestService {
 				constructor(public value: string) {}
 			}
 
-			const container = Container.builder()
-				.add(TestService, () => new TestService('first'))
-				.add(TestService, () => new TestService('second'))
-				.build();
+			const builder = Container.builder().add(
+				TestService,
+				() => new TestService('first')
+			);
 
-			const instance = await container.resolve(TestService);
-			expect(instance.value).toBe('second');
+			expect(() =>
+				builder.add(TestService, () => new TestService('second'))
+			).toThrow(DuplicateProviderError);
 		});
 
 		it('should register with lifecycle object', async () => {

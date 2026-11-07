@@ -3,6 +3,7 @@ import {
 	ContainerDestroyedError,
 	DependencyCreationError,
 	DependencyFinalizationError,
+	DuplicateProviderError,
 	UnknownDependencyError,
 } from './errors.js';
 import { Layer } from './layer.js';
@@ -134,6 +135,34 @@ export type BuilderTags<B> =
 	B extends IContainerBuilder<infer TTags> ? TTags : never;
 
 /**
+ * Stores a builder registration.
+ *
+ * @throws {DuplicateProviderError} If the tag is already registered
+ * @internal
+ */
+function registerSpec<TTags extends AnyTag>(
+	factories: Map<AnyTag, Factory<unknown, TTags>>,
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	finalizers: Map<AnyTag, Finalizer<any>>,
+	tag: AnyTag,
+	spec: DependencySpec<AnyTag, TTags>
+): void {
+	if (factories.has(tag)) {
+		throw new DuplicateProviderError(tag, []);
+	}
+	if (typeof spec === 'function') {
+		factories.set(tag, spec as Factory<unknown, TTags>);
+		return;
+	}
+	// Bind the create method to preserve 'this' context for class instances
+	factories.set(tag, spec.create.bind(spec) as Factory<unknown, TTags>);
+	if (spec.cleanup) {
+		// Bind the cleanup method to preserve 'this' context for class instances
+		finalizers.set(tag, spec.cleanup.bind(spec));
+	}
+}
+
+/**
  * Builder for constructing immutable containers.
  *
  * Use `Container.builder()` to create a builder, then chain `.add()` calls
@@ -162,29 +191,13 @@ export class ContainerBuilder<TTags extends AnyTag = never> {
 	 * @param tag - The dependency tag (class or ValueTag)
 	 * @param spec - Factory function or lifecycle object
 	 * @returns The builder with updated type information
+	 * @throws {DuplicateProviderError} If the tag is already registered
 	 */
 	add<T extends AnyTag>(
 		tag: T,
 		spec: DependencySpec<T, TTags>
 	): ContainerBuilder<TTags | T> {
-		if (typeof spec === 'function') {
-			this.factories.set(tag, spec as Factory<unknown, TTags>);
-			// Remove any existing finalizer when registering with just a factory
-			this.finalizers.delete(tag);
-		} else {
-			// Bind the create method to preserve 'this' context for class instances
-			this.factories.set(
-				tag,
-				spec.create.bind(spec) as Factory<unknown, TTags>
-			);
-			if (spec.cleanup) {
-				// Bind the cleanup method to preserve 'this' context for class instances
-				this.finalizers.set(tag, spec.cleanup.bind(spec));
-			} else {
-				// Remove any existing finalizer when registering with just a create function
-				this.finalizers.delete(tag);
-			}
-		}
+		registerSpec(this.factories, this.finalizers, tag, spec);
 		return this as ContainerBuilder<TTags | T>;
 	}
 
@@ -331,6 +344,9 @@ export class Container<
 	 * `Container.builder()` and building the result.
 	 *
 	 * @param layer - A layer with no requirements (all dependencies satisfied)
+	 * @throws {DuplicateProviderError} If two different layers provide the same tag
+	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
+	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
 	 *
 	 * @example
 	 * ```typescript
@@ -549,29 +565,17 @@ export class ScopedContainerBuilder<TTags extends AnyTag = never> {
 
 	/**
 	 * Registers a dependency with a factory function or lifecycle object.
+	 *
+	 * A tag registered in a parent scope may be registered again here; this
+	 * scope's registration shadows the parent's.
+	 *
+	 * @throws {DuplicateProviderError} If the tag is already registered in this scope
 	 */
 	add<T extends AnyTag>(
 		tag: T,
 		spec: DependencySpec<T, TTags>
 	): ScopedContainerBuilder<TTags | T> {
-		if (typeof spec === 'function') {
-			this.factories.set(tag, spec as Factory<unknown, TTags>);
-			// Remove any existing finalizer when registering with just a factory
-			this.finalizers.delete(tag);
-		} else {
-			// Bind the create method to preserve 'this' context for class instances
-			this.factories.set(
-				tag,
-				spec.create.bind(spec) as Factory<unknown, TTags>
-			);
-			if (spec.cleanup) {
-				// Bind the cleanup method to preserve 'this' context for class instances
-				this.finalizers.set(tag, spec.cleanup.bind(spec));
-			} else {
-				// Remove any existing finalizer when registering with just a factory
-				this.finalizers.delete(tag);
-			}
-		}
+		registerSpec(this.factories, this.finalizers, tag, spec);
 		return this as ScopedContainerBuilder<TTags | T>;
 	}
 
@@ -686,6 +690,9 @@ export class ScopedContainer<
 	 *
 	 * @param scope - Identifier for the scope (for debugging)
 	 * @param layer - A layer with no requirements (all dependencies satisfied)
+	 * @throws {DuplicateProviderError} If two different layers provide the same tag
+	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
+	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
 	 *
 	 * @example
 	 * ```typescript
@@ -783,8 +790,14 @@ export class ScopedContainer<
 	 * This is a convenience method combining child() + layer.apply() + build().
 	 * Use this when you have a layer ready to apply.
 	 *
+	 * The layer's providers shadow parent providers of the same tags. Overrides
+	 * replace only providers within the child's layer.
+	 *
 	 * @param scope - Identifier for the child scope
 	 * @param layer - Layer to apply to the child (can require parent's tags)
+	 * @throws {DuplicateProviderError} If two different layers provide the same tag
+	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
+	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer in the child provides
 	 *
 	 * @example
 	 * ```typescript

@@ -132,6 +132,83 @@ export class UnknownDependencyError extends SandlyError {
 }
 
 /**
+ * Formats definition sites as an indented list for error messages.
+ * Unknown sites are omitted.
+ */
+function formatSites(sites: readonly (string | undefined)[]): string {
+	return sites
+		.filter((site): site is string => site !== undefined)
+		.map((site) => `\n  - ${site}`)
+		.join('');
+}
+
+/**
+ * Error thrown when a container is built with more than one provider for a dependency.
+ *
+ * A layer reached through several composition paths counts once, and
+ * `Layer.value` / `Layer.mock` bindings of one tag to the same value
+ * (`Object.is`) count once. Two different layers providing one tag are a
+ * conflict; replace a provider deliberately with `layer.override()`.
+ *
+ * @example
+ * ```typescript
+ * const layer = Layer.value(PortTag, 3000).merge(Layer.value(PortTag, 4000));
+ * Container.from(layer); // throws DuplicateProviderError
+ * ```
+ */
+export class DuplicateProviderError extends SandlyError {
+	constructor(tag: AnyTag, definitionSites: readonly (string | undefined)[]) {
+		super(
+			`Dependency "${Tag.id(tag)}" has more than one provider${formatSites(definitionSites)}`,
+			{ detail: { tag: Tag.id(tag), definitionSites } }
+		);
+	}
+}
+
+/**
+ * Error thrown when a container is built with more than one `override()` for a dependency.
+ */
+export class DuplicateOverrideError extends SandlyError {
+	constructor(tag: AnyTag, definitionSites: readonly (string | undefined)[]) {
+		super(
+			`Dependency "${Tag.id(tag)}" has more than one override${formatSites(definitionSites)}`,
+			{ detail: { tag: Tag.id(tag), definitionSites } }
+		);
+	}
+}
+
+/**
+ * Error thrown when an `override()` replaces a dependency that nothing else in
+ * the same build provides.
+ *
+ * Overrides only replace providers within the container being built; a child
+ * scope shadows parent dependencies with a plain `provide()` instead.
+ */
+export class OverrideTargetNotFoundError extends SandlyError {
+	constructor(tag: AnyTag, definitionSite: string | undefined) {
+		super(
+			`Override for dependency "${Tag.id(tag)}" has no provider to replace${formatSites([definitionSite])}`,
+			{ detail: { tag: Tag.id(tag), definitionSite } }
+		);
+	}
+}
+
+/**
+ * Error thrown when a placeholder registered with `Layer.unused()` is resolved.
+ *
+ * Thrown from the placeholder's factory, so `resolve()` surfaces it as the
+ * root cause of a {@link DependencyCreationError}.
+ */
+export class UnusedDependencyResolvedError extends SandlyError {
+	constructor(tag: AnyTag) {
+		super(
+			`Dependency "${Tag.id(tag)}" was provided with Layer.unused() but was resolved`,
+			{ detail: { tag: Tag.id(tag) } }
+		);
+	}
+}
+
+/**
  * Error thrown when a circular dependency is detected during resolution.
  *
  * @example

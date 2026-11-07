@@ -1,5 +1,12 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { Container, ScopedContainer } from './container.js';
+import {
+	DependencyCreationError,
+	DuplicateOverrideError,
+	DuplicateProviderError,
+	OverrideTargetNotFoundError,
+	UnusedDependencyResolvedError,
+} from './errors.js';
 import { Layer } from './layer.js';
 import { Tag } from './tag.js';
 
@@ -672,6 +679,304 @@ describe('Layer', () => {
 			expect(await container.resolve(ServiceA)).toBeInstanceOf(ServiceA);
 			expect(await container.resolve(ServiceB)).toBeInstanceOf(ServiceB);
 			expect(await container.resolve(ServiceC)).toBeInstanceOf(ServiceC);
+		});
+	});
+
+	describe('build semantics', () => {
+		class Logger {}
+		class ServiceA {
+			constructor(public logger: Logger) {}
+		}
+		class ServiceB {
+			constructor(public logger: Logger) {}
+		}
+
+		it('should apply a layer reached through several paths once', async () => {
+			let registrations = 0;
+			const loggerLayer = Layer.create({
+				requires: [],
+				apply: (builder) => {
+					registrations++;
+					return builder.add(Logger, () => new Logger());
+				},
+			});
+			const aLayer = Layer.service(ServiceA, [Logger]).provide(
+				loggerLayer
+			);
+			const bLayer = Layer.service(ServiceB, [Logger]).provide(
+				loggerLayer
+			);
+
+			const container = Container.from(
+				aLayer.merge(bLayer).merge(loggerLayer)
+			);
+			const [a, b] = await container.resolveAll(ServiceA, ServiceB);
+
+			expect(registrations).toBe(1);
+			expect(a.logger).toBe(b.logger);
+		});
+
+		it('should throw DuplicateProviderError when two different layers provide one tag', () => {
+			const layer = Layer.service(Logger, []).merge(
+				Layer.service(Logger, [])
+			);
+
+			expect(() => Container.from(layer)).toThrow(DuplicateProviderError);
+		});
+
+		it('should name both definition sites in the error', () => {
+			const layer = Layer.service(Logger, []).merge(
+				Layer.service(Logger, [])
+			);
+
+			expect(() => Container.from(layer)).toThrow(
+				/Logger" has more than one provider\n {2}- .*layer\.test\.ts:\d+:\d+.*\n {2}- .*layer\.test\.ts:\d+:\d+/
+			);
+		});
+
+		it('should detect a conflict hidden inside provide()', () => {
+			const aLayer = Layer.service(ServiceA, [Logger]).provide(
+				Layer.service(Logger, [])
+			);
+			const bLayer = Layer.service(ServiceB, [Logger]).provide(
+				Layer.service(Logger, [])
+			);
+
+			expect(() => Container.from(aLayer.merge(bLayer))).toThrow(
+				DuplicateProviderError
+			);
+		});
+
+		it('should treat bindings of one tag to the same value as one provider', async () => {
+			const PortTag = Tag.of('port')<number>();
+			const layer = Layer.value(PortTag, 3000).merge(
+				Layer.value(PortTag, 3000)
+			);
+
+			const container = Container.from(layer);
+
+			expect(await container.resolve(PortTag)).toBe(3000);
+		});
+
+		it('should reject bindings of one tag to different values', () => {
+			const PortTag = Tag.of('port')<number>();
+			const layer = Layer.value(PortTag, 3000).merge(
+				Layer.value(PortTag, 4000)
+			);
+
+			expect(() => Container.from(layer)).toThrow(DuplicateProviderError);
+		});
+
+		it('should reject a layer providing a tag the builder already has', () => {
+			const builder = Container.builder().add(Logger, () => new Logger());
+
+			expect(() => Layer.service(Logger, []).apply(builder)).toThrow(
+				DuplicateProviderError
+			);
+		});
+
+		it('should let a child scope shadow a parent provider', async () => {
+			const NameTag = Tag.of('name')<string>();
+			const parent = ScopedContainer.from(
+				'app',
+				Layer.value(NameTag, 'parent')
+			);
+
+			const child = parent.childFrom(
+				'request',
+				Layer.value(NameTag, 'child')
+			);
+
+			expect(await child.resolve(NameTag)).toBe('child');
+			expect(await parent.resolve(NameTag)).toBe('parent');
+		});
+	});
+
+	describe('override()', () => {
+		class ExchangeRates {
+			rate(): number {
+				return 1;
+			}
+		}
+		class Pricing {
+			constructor(public rates: ExchangeRates) {}
+		}
+		class Checkout {
+			constructor(public pricing: Pricing) {}
+		}
+
+		const pricingLayer = Layer.service(Pricing, [ExchangeRates]).provide(
+			Layer.service(ExchangeRates, [])
+		);
+		const checkoutLayer = Layer.service(Checkout, [Pricing]).provide(
+			pricingLayer
+		);
+		const fakeRates = (value: number) =>
+			Layer.mock(ExchangeRates, { rate: () => value });
+
+		it('should replace a provider nested anywhere in the composition', async () => {
+			const container = Container.from(
+				checkoutLayer.override(fakeRates(42))
+			);
+
+			const checkout = await container.resolve(Checkout);
+
+			expect(checkout.pricing.rates.rate()).toBe(42);
+		});
+
+		it('should win regardless of position in the chain', async () => {
+			const layer = Layer.service(Checkout, [Pricing])
+				.override(fakeRates(42))
+				.provide(pricingLayer);
+
+			const checkout = await Container.from(layer).resolve(Checkout);
+
+			expect(checkout.pricing.rates.rate()).toBe(42);
+		});
+
+		it("should keep the replacement's own dependencies as ordinary providers", async () => {
+			const RateTag = Tag.of('rate')<number>();
+			const configurableRates = Layer.create({
+				requires: [RateTag],
+				apply: (builder) =>
+					builder.add(ExchangeRates, async (ctx) => {
+						const rate = await ctx.resolve(RateTag);
+						return { rate: () => rate };
+					}),
+			}).provide(Layer.value(RateTag, 7));
+
+			const checkout = await Container.from(
+				checkoutLayer.override(configurableRates)
+			).resolve(Checkout);
+
+			expect(checkout.pricing.rates.rate()).toBe(7);
+		});
+
+		it('should accept the same override layer reached through several paths', async () => {
+			const fake = fakeRates(42);
+			const layer = checkoutLayer
+				.override(fake)
+				.merge(pricingLayer.override(fake));
+
+			const pricing = await Container.from(layer).resolve(Pricing);
+
+			expect(pricing.rates.rate()).toBe(42);
+		});
+
+		it('should throw OverrideTargetNotFoundError when nothing else provides the tag', () => {
+			const layer = Layer.service(Checkout, [Pricing])
+				.provide(Layer.mock(Pricing, {}))
+				.override(fakeRates(42));
+
+			expect(() => Container.from(layer)).toThrow(
+				OverrideTargetNotFoundError
+			);
+		});
+
+		it('should throw DuplicateOverrideError for two overrides of one tag', () => {
+			const layer = checkoutLayer
+				.override(fakeRates(1))
+				.override(fakeRates(2));
+
+			expect(() => Container.from(layer)).toThrow(DuplicateOverrideError);
+		});
+
+		it('should only replace providers within the child scope being built', async () => {
+			const parent = ScopedContainer.from('app', pricingLayer);
+			const parentPricing = await parent.resolve(Pricing);
+
+			const child = parent.childFrom(
+				'request',
+				pricingLayer.override(fakeRates(42))
+			);
+
+			expect((await child.resolve(Pricing)).rates.rate()).toBe(42);
+			expect(await parent.resolve(Pricing)).toBe(parentPricing);
+			expect(parentPricing.rates.rate()).toBe(1);
+		});
+
+		it('should not override a provider that only the parent scope has', () => {
+			const parent = ScopedContainer.from(
+				'app',
+				Layer.service(ExchangeRates, [])
+			);
+
+			expect(() =>
+				parent.childFrom(
+					'request',
+					Layer.service(Pricing, [ExchangeRates]).override(
+						fakeRates(42)
+					)
+				)
+			).toThrow(OverrideTargetNotFoundError);
+		});
+
+		it("should keep the replaced provider's requirements in the type", () => {
+			const SourceTag = Tag.of('source')<string>();
+			class SourcedRates extends ExchangeRates {
+				constructor(public source: string) {
+					super();
+				}
+			}
+			const layer = Layer.service(Pricing, [SourcedRates])
+				.provide(Layer.service(SourcedRates, [SourceTag]))
+				.override(Layer.mock(SourcedRates, { rate: () => 2 }));
+
+			expectTypeOf(layer).toEqualTypeOf<
+				Layer<typeof SourceTag, typeof Pricing>
+			>();
+		});
+	});
+
+	describe('Layer.unused()', () => {
+		const SourceTag = Tag.of('source')<string>();
+		const RegionTag = Tag.of('region')<string>();
+
+		it('should provide the given tags at the type level', () => {
+			expectTypeOf(Layer.unused(SourceTag, RegionTag)).toEqualTypeOf<
+				Layer<never, typeof SourceTag | typeof RegionTag>
+			>();
+		});
+
+		it('should satisfy requirements left by an override', async () => {
+			class Rates {
+				constructor(public source: string) {}
+				rate(): number {
+					return 1;
+				}
+			}
+			class Pricing {
+				constructor(public rates: Rates) {}
+			}
+			const layer = Layer.service(Pricing, [Rates])
+				.provide(Layer.service(Rates, [SourceTag]))
+				.override(Layer.mock(Rates, { rate: () => 2 }))
+				.provide(Layer.unused(SourceTag));
+
+			const pricing = await Container.from(layer).resolve(Pricing);
+
+			expect(pricing.rates.rate()).toBe(2);
+		});
+
+		it('should fail resolution of a placeholder', async () => {
+			const container = Container.from(Layer.unused(SourceTag));
+
+			const error = await container
+				.resolve(SourceTag)
+				.catch((err: unknown) => err);
+
+			expect(error).toBeInstanceOf(DependencyCreationError);
+			expect(
+				(error as DependencyCreationError).getRootCause()
+			).toBeInstanceOf(UnusedDependencyResolvedError);
+		});
+
+		it('should conflict with a real provider of the same tag', () => {
+			const layer = Layer.unused(SourceTag).merge(
+				Layer.value(SourceTag, 'feed')
+			);
+
+			expect(() => Container.from(layer)).toThrow(DuplicateProviderError);
 		});
 	});
 

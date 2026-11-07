@@ -380,6 +380,36 @@ const incomplete = Layer.service(UserService, [Database]);
 const container = Container.from(incomplete); // Type error!
 ```
 
+### How Layers Are Built
+
+Building a container flattens a layer into exactly one provider per tag, so a layer means the same thing wherever it is used:
+
+- **Applied once.** A layer reached through several composition paths is registered once. Providing a shared layer inline in every service that needs it is free.
+- **One provider per tag.** Two different layers providing the same tag throw `DuplicateProviderError` at build time, naming both definition sites. Binding a tag to the same value twice (`Layer.value`, compared with `Object.is`) counts as one provider.
+- **Overrides are explicit.** `layer.override(replacement)` replaces a provider wherever it sits in the composition, however deeply nested.
+
+```typescript
+const checkoutLayer = Layer.service(Checkout, [Pricing]).provide(
+	Layer.service(Pricing, [ExchangeRates]).provide(exchangeRatesLayer)
+);
+
+// Replaces ExchangeRates two levels down
+const testLayer = checkoutLayer.override(
+	Layer.mock(ExchangeRates, { rate: () => 1.5 })
+);
+```
+
+An override keeps the requirements of the provider it replaces, because layer types do not track which provider needs what. Satisfy the ones the replacement made unreachable with `Layer.unused()`, which registers placeholders that throw if resolved:
+
+```typescript
+// exchangeRatesLayer requires ExchangeRatesConfig; the mock does not
+const testLayer = checkoutLayer
+	.override(Layer.mock(ExchangeRates, { rate: () => 1.5 }))
+	.provide(Layer.unused(ExchangeRatesConfig));
+```
+
+An override for a tag that nothing else in the build provides throws `OverrideTargetNotFoundError`, so stale overrides cannot linger. Overrides apply to the container being built: in a child scope they replace only the child's providers, never instances the parent owns.
+
 ## Scoped Containers
 
 ### Request Scoping for Web Servers
@@ -469,6 +499,14 @@ try {
 }
 ```
 
+Building a container from a layer (`Container.from`, `ScopedContainer.from`, `childFrom`) can throw composition errors, each naming the layers' definition sites:
+
+- `DuplicateProviderError`: two different layers provide the same tag
+- `DuplicateOverrideError`: two different overrides replace the same tag
+- `OverrideTargetNotFoundError`: an override replaces a tag nothing else provides
+
+Resolving a `Layer.unused()` placeholder fails with `UnusedDependencyResolvedError` as the root cause.
+
 ## API Reference
 
 ### Container
@@ -488,8 +526,8 @@ try {
 
 | Method                   | Description           |
 | ------------------------ | --------------------- |
-| `builder.add(tag, spec)` | Register a dependency |
-| `builder.build()`        | Create the container  |
+| `builder.add(tag, spec)` | Register a dependency (once per tag) |
+| `builder.build()`        | Create the container                 |
 
 ### Layer
 
@@ -500,10 +538,12 @@ try {
 | `Layer.mock(tag, implementation)`      | Create layer with mock (partial for ServiceTag) |
 | `Layer.create({ requires, apply })`    | Create custom layer                             |
 | `Layer.empty()`                        | Create empty layer                              |
+| `Layer.unused(...tags)`                | Placeholders for tags that are never resolved   |
 | `Layer.merge(a, b)`                    | Merge two layers (smart subtraction)            |
 | `Layer.mergeAll(...layers)`            | Merge multiple layers (smart subtraction)       |
 | `layer.provide(dep)`                   | Satisfy dependencies, expose only target's      |
 | `layer.merge(other)`                   | Merge layers, expose both, subtract satisfied   |
+| `layer.override(replacement)`          | Replace providers anywhere in the composition   |
 
 ### ScopedContainer
 
@@ -573,6 +613,15 @@ expect(users).toHaveLength(2);
 - ✅ TypeScript validates mock method signatures
 - ✅ Works seamlessly with `Layer.service()` composition
 - ✅ Clear intent: `mock()` for tests, `value()` for production
+
+`provide()` works when the layer leaves the dependency as a requirement. When the production layer already provides it, providing a mock as well is a `DuplicateProviderError`; replace it with `override()` instead, wherever it sits:
+
+```typescript
+// appLayer provides ResourcesRepository internally
+const testLayer = appLayer.override(
+	Layer.mock(ResourcesRepository, { listByCrawlId: async () => [] })
+);
+```
 
 ## Comparison with Alternatives
 

@@ -8,6 +8,15 @@ import {
 	ScopedContainer,
 	ScopedContainerBuilder,
 } from './container.js';
+import { UnusedDependencyResolvedError } from './errors.js';
+import {
+	captureDefinitionSite,
+	type DefinitionSite,
+	type LayerNode,
+	LayerNodeKey,
+	type LeafNode,
+	resolveProviders,
+} from './layer-graph.js';
 import { AnyTag, ServiceTag, Tag, TagType, ValueTag } from './tag.js';
 import { Contravariant, Covariant } from './types.js';
 
@@ -123,6 +132,15 @@ type UnionOfProvides<T extends readonly AnyLayer[]> = {
  * - **TRequires (covariant)**: A layer requiring fewer dependencies can substitute one requiring more
  * - **TProvides (contravariant)**: A layer providing more services can substitute one providing fewer
  *
+ * ## Build Semantics
+ *
+ * Building a container flattens the layer into one provider per tag, so the
+ * result does not depend on composition order:
+ *
+ * - A layer object reached through several composition paths is applied once.
+ * - Two different layers providing the same tag throw {@link DuplicateProviderError}.
+ * - {@link Layer.override} replaces a provider deliberately, wherever it sits.
+ *
  * @template TRequires - The union of tags this layer requires
  * @template TProvides - The union of tags this layer provides
  *
@@ -146,9 +164,18 @@ export interface Layer<TRequires extends AnyTag, TProvides extends AnyTag> {
 	};
 
 	/**
-	 * Applies this layer's registrations to a container builder.
-	 * Works with both ContainerBuilder and ScopedContainerBuilder.
+	 * The layer's node in the composition graph.
 	 * @internal
+	 */
+	readonly [LayerNodeKey]: LayerNode;
+
+	/**
+	 * Registers this layer's providers, one per tag, on a container builder.
+	 * Works with both ContainerBuilder and ScopedContainerBuilder.
+	 *
+	 * @throws {DuplicateProviderError} If two different layers provide the same tag, or the builder already has one of the tags
+	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
+	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
 	 */
 	apply: <TBuilder extends IContainerBuilder<TRequires>>(
 		builder: TBuilder
@@ -199,95 +226,90 @@ export interface Layer<TRequires extends AnyTag, TProvides extends AnyTag> {
 		Exclude<TRequires | TOtherRequires, TProvides | TOtherProvides>,
 		TProvides | TOtherProvides
 	>;
+
+	/**
+	 * Replaces the providers of the replacement's tags anywhere in this
+	 * layer's composition, regardless of nesting depth or position in the chain.
+	 *
+	 * Only the replacement's exposed provisions replace anything; the layers it
+	 * `provide()`s internally are ordinary providers.
+	 *
+	 * The result keeps this layer's requirements, including those of the
+	 * providers being replaced. Satisfy requirements that the replacement made
+	 * unreachable with {@link Layer.unused}.
+	 *
+	 * Building throws {@link OverrideTargetNotFoundError} if nothing else in the
+	 * build provides an overridden tag, and {@link DuplicateOverrideError} if two
+	 * different overrides replace the same tag.
+	 *
+	 * @example
+	 * ```typescript
+	 * const testLayer = appLayer
+	 *   .override(Layer.value(PaymentGateway, fakeGateway))
+	 *   .provide(Layer.unused(PaymentGatewayConfig));
+	 * ```
+	 */
+	override: <
+		TReplacementRequires extends AnyTag,
+		TReplacementProvides extends AnyTag,
+	>(
+		replacement: Layer<TReplacementRequires, TReplacementProvides>
+	) => Layer<Exclude<TRequires | TReplacementRequires, TProvides>, TProvides>;
 }
 
 /**
- * Creates a layer from a builder function.
+ * Creates a layer around a composition graph node.
+ *
+ * Type parameters are not checked against the node; callers state them.
  * @internal
  */
 function createLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
-	applyFn: <TBuilder extends IContainerBuilder<TRequires>>(
-		builder: TBuilder
-	) => WithBuilderTags<TBuilder, TRequires | TProvides>
+	node: LayerNode
 ): Layer<TRequires, TProvides> {
-	const layerImpl: Layer<TRequires, TProvides> = {
-		apply: applyFn,
+	const layer: Layer<TRequires, TProvides> = {
+		[LayerNodeKey]: node,
+
+		apply(builder) {
+			let current: IContainerBuilder<AnyTag> = builder;
+			for (const provider of resolveProviders(layer)) {
+				current = current.add(provider.tag, provider.spec);
+			}
+			// Builders return themselves from add(); only the tag type changes.
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
+			return current as any;
+		},
 
 		provide(dependency) {
-			return createProvidedLayer(dependency, layerImpl);
+			return createLayer({ kind: 'provide', target: layer, dependency });
 		},
 
 		merge(other) {
-			return createMergedLayer(layerImpl, other);
+			return createLayer({ kind: 'merge', layers: [layer, other] });
+		},
+
+		override(replacement) {
+			return createLayer({ kind: 'override', base: layer, replacement });
 		},
 	};
-	return layerImpl;
+	return layer;
 }
 
 /**
- * Creates a layer that only exposes the target's provisions.
- *
- * Runtime is identical to merge: both layers' factories are added to the
- * builder, and resolutions across them work transparently. Only the result
- * type narrows provisions to the target's.
+ * Captures the site that called the given `Layer` factory.
  * @internal
  */
-function createProvidedLayer<
-	TDepRequires extends AnyTag,
-	TDepProvides extends AnyTag,
-	TRequires extends AnyTag,
-	TProvides extends AnyTag,
->(
-	dependency: Layer<TDepRequires, TDepProvides>,
-	target: Layer<TRequires, TProvides>
-): Layer<
-	Exclude<TRequires | TDepRequires, TProvides | TDepProvides>,
-	TProvides
-> {
-	return createMergedLayer(dependency, target) as Layer<
-		Exclude<TRequires | TDepRequires, TProvides | TDepProvides>,
-		TProvides
-	>;
+function definitionSiteOf(factory: keyof typeof Layer): DefinitionSite {
+	return captureDefinitionSite(Layer[factory]);
 }
 
 /**
- * Creates a merged layer from two layers, exposing both layers' provisions.
- *
- * Requirements satisfied internally (by either layer's provisions) are
- * subtracted from the result's requirements at the type level. The runtime
- * behavior is unchanged - both layers' factories are added to the builder
- * and resolutions are wired transparently in either direction.
+ * Creates a leaf layer that registers its providers itself.
  * @internal
  */
-function createMergedLayer<
-	TRequires1 extends AnyTag,
-	TProvides1 extends AnyTag,
-	TRequires2 extends AnyTag,
-	TProvides2 extends AnyTag,
->(
-	layer1: Layer<TRequires1, TProvides1>,
-	layer2: Layer<TRequires2, TProvides2>
-): Layer<
-	Exclude<TRequires1 | TRequires2, TProvides1 | TProvides2>,
-	TProvides1 | TProvides2
-> {
-	type TR = Exclude<TRequires1 | TRequires2, TProvides1 | TProvides2>;
-	type TP = TProvides1 | TProvides2;
-	const merged: Layer<TR, TP> = {
-		apply: (builder) => {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const with1 = layer1.apply(builder as any);
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
-			return layer2.apply(with1 as any) as any;
-		},
-		provide(dep) {
-			return createProvidedLayer(dep, merged);
-		},
-		merge(other) {
-			return createMergedLayer(merged, other);
-		},
-	};
-	return merged;
+function createLeafLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
+	leaf: Omit<LeafNode, 'kind'>
+): Layer<TRequires, TProvides> {
+	return createLayer({ kind: 'leaf', ...leaf });
 }
 
 /**
@@ -347,25 +369,25 @@ export const Layer = {
 		deps: TDeps & ValidDepsFor<ConstructorParameters<TClass>>,
 		options?: { cleanup?: Finalizer<InstanceType<TClass>> }
 	): Layer<ExtractTags<TDeps>, TClass> {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		return createLayer((builder: any) => {
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-			return builder.add(cls, {
-				create: async (
-					ctx: ResolutionContext<ExtractTags<TDeps>>
-				): Promise<InstanceType<TClass>> => {
-					// Resolve tags, pass through raw values
-					const args = await Promise.all(
-						deps.map((dep) =>
-							// eslint-disable-next-line @typescript-eslint/no-explicit-any
-							Tag.isTag(dep) ? ctx.resolve(dep as any) : dep
-						)
-					);
+		return createLeafLayer({
+			site: definitionSiteOf('service'),
+			register: (builder) => {
+				builder.add(cls, {
+					create: async (
+						ctx: ResolutionContext<AnyTag>
+					): Promise<InstanceType<TClass>> => {
+						// Resolve tags, pass through raw values
+						const args = await Promise.all(
+							deps.map((dep) =>
+								Tag.isTag(dep) ? ctx.resolve(dep) : dep
+							)
+						);
 
-					return new cls(...args) as InstanceType<TClass>;
-				},
-				cleanup: options?.cleanup,
-			});
+						return new cls(...args) as InstanceType<TClass>;
+					},
+					cleanup: options?.cleanup,
+				});
+			},
 		});
 	},
 
@@ -397,14 +419,13 @@ export const Layer = {
 	 * ```
 	 */
 	value<T extends AnyTag>(tag: T, value: TagType<T>): Layer<never, T> {
-		return createLayer<never, T>(
-			<TBuilder extends IContainerBuilder>(builder: TBuilder) => {
-				return builder.add(tag, () => value) as WithBuilderTags<
-					TBuilder,
-					T
-				>;
-			}
-		);
+		return createLeafLayer({
+			site: definitionSiteOf('value'),
+			binding: { value },
+			register: (builder) => {
+				builder.add(tag, () => value);
+			},
+		});
 	},
 
 	/**
@@ -452,14 +473,13 @@ export const Layer = {
 			? Partial<TagType<T>> | TagType<T>
 			: TagType<T>
 	): Layer<never, T> {
-		return createLayer<never, T>(
-			<TBuilder extends IContainerBuilder>(builder: TBuilder) => {
-				return builder.add(
-					tag,
-					() => implementation as TagType<T>
-				) as WithBuilderTags<TBuilder, T>;
-			}
-		);
+		return createLeafLayer({
+			site: definitionSiteOf('mock'),
+			binding: { value: implementation },
+			register: (builder) => {
+				builder.add(tag, () => implementation);
+			},
+		});
 	},
 
 	/**
@@ -504,20 +524,12 @@ export const Layer = {
 			builder: IContainerBuilder<TRequires[number]>
 		) => IContainerBuilder<TAllTags>;
 	}): Layer<TRequires[number], Exclude<TAllTags, TRequires[number]>> {
-		type TProvides = Exclude<TAllTags, TRequires[number]>;
-		const layer: Layer<TRequires[number], TProvides> = {
-			apply: (builder) => {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-return
-				return options.apply(builder as any) as any;
+		return createLeafLayer({
+			site: definitionSiteOf('create'),
+			register: (builder) => {
+				options.apply(builder);
 			},
-			provide(dep) {
-				return createProvidedLayer(dep, layer);
-			},
-			merge(other) {
-				return createMergedLayer(layer, other);
-			},
-		};
-		return layer;
+		});
 	},
 
 	/**
@@ -531,8 +543,40 @@ export const Layer = {
 	 * ```
 	 */
 	empty(): Layer<never, never> {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
-		return createLayer((builder: any) => builder);
+		return createLayer({ kind: 'merge', layers: [] });
+	},
+
+	/**
+	 * Provides placeholders for tags that are required by type but never
+	 * resolved, typically the dependencies of a provider replaced with
+	 * `layer.override()`.
+	 *
+	 * Resolving a placeholder fails with {@link UnusedDependencyResolvedError}
+	 * (as the root cause of a `DependencyCreationError`).
+	 *
+	 * @param tags - The tags to satisfy with placeholders
+	 *
+	 * @example
+	 * ```typescript
+	 * // ExchangeRateService normally requires ExchangeRateConfig
+	 * const testLayer = pricingLayer
+	 *   .override(Layer.value(ExchangeRateService, fakeRates))
+	 *   .provide(Layer.unused(ExchangeRateConfig));
+	 * ```
+	 */
+	unused<const TTags extends readonly [AnyTag, ...AnyTag[]]>(
+		...tags: TTags
+	): Layer<never, TTags[number]> {
+		return createLeafLayer({
+			site: definitionSiteOf('unused'),
+			register: (builder) => {
+				for (const tag of tags) {
+					builder.add(tag, () => {
+						throw new UnusedDependencyResolvedError(tag);
+					});
+				}
+			},
+		});
 	},
 
 	/**
@@ -559,10 +603,7 @@ export const Layer = {
 		Exclude<UnionOfRequires<T>, UnionOfProvides<T>>,
 		UnionOfProvides<T>
 	> {
-		return layers.reduce((acc, layer) => acc.merge(layer)) as Layer<
-			Exclude<UnionOfRequires<T>, UnionOfProvides<T>>,
-			UnionOfProvides<T>
-		>;
+		return createLayer({ kind: 'merge', layers });
 	},
 
 	/**
