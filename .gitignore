@@ -27,7 +27,7 @@ Desktop.ini
 # local-only files (may be useful during development)
 *.local.*
 *.local
-docs/v4-plan.md
+.cursor/plans/
 
 **/dist/
 
