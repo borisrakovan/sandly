@@ -3,6 +3,7 @@ import {
 	DuplicateOverrideError,
 	DuplicateProviderError,
 	OverrideTargetNotFoundError,
+	SingletonInChildScopeError,
 } from './errors.js';
 import type { AnyLayer } from './layer.js';
 import type { AnyTag } from './tag.js';
@@ -14,7 +15,7 @@ import type { AnyTag } from './tag.js';
 export const LayerNodeKey: unique symbol = Symbol.for('sandly/LayerNode');
 
 /**
- * Where a leaf layer was created. Holds a captured stack trace that is only
+ * Where a leaf or singleton layer was created. Holds a captured stack trace that is only
  * formatted when an error reports it.
  * @internal
  */
@@ -34,12 +35,24 @@ export type LeafNode = {
 };
 
 /**
+ * A `Layer.singleton()` wrapper. Its layer's leaves are ordinary providers;
+ * the wrapper only keeps the composition out of child scopes.
+ * @internal
+ */
+export type SingletonNode = {
+	readonly kind: 'singleton';
+	readonly layer: AnyLayer;
+	readonly site: DefinitionSite;
+};
+
+/**
  * A node in the layer composition graph. The graph is a DAG: one layer object
  * is typically referenced by many parents.
  * @internal
  */
 export type LayerNode =
 	| LeafNode
+	| SingletonNode
 	| {
 			readonly kind: 'provide';
 			readonly target: AnyLayer;
@@ -94,7 +107,8 @@ function formatSite(site: DefinitionSite): string | undefined {
 type Mode = 'regular' | 'override';
 
 /**
- * Walks the composition graph once per node and mode, collecting leaves.
+ * Walks the composition graph once per node and mode, collecting leaves and
+ * singleton wrappers.
  *
  * Leaves exposed by an override's replacement are override leaves; the
  * replacement's own dependencies (what it `provide()`s internally) stay
@@ -103,6 +117,7 @@ type Mode = 'regular' | 'override';
 function collectLeaves(root: AnyLayer): {
 	regular: LeafNode[];
 	overrides: LeafNode[];
+	singletons: SingletonNode[];
 } {
 	const visited: Record<Mode, Set<LayerNode>> = {
 		regular: new Set(),
@@ -112,6 +127,7 @@ function collectLeaves(root: AnyLayer): {
 		regular: new Set(),
 		override: new Set(),
 	};
+	const singletons = new Set<SingletonNode>();
 
 	const visit = (layer: AnyLayer, mode: Mode): void => {
 		const node = layer[LayerNodeKey];
@@ -123,6 +139,10 @@ function collectLeaves(root: AnyLayer): {
 		switch (node.kind) {
 			case 'leaf':
 				leaves[mode].add(node);
+				return;
+			case 'singleton':
+				singletons.add(node);
+				visit(node.layer, mode);
 				return;
 			case 'provide':
 				visit(node.target, mode);
@@ -146,7 +166,48 @@ function collectLeaves(root: AnyLayer): {
 			(leaf) => !leaves.override.has(leaf)
 		),
 		overrides: [...leaves.override],
+		singletons: [...singletons],
 	};
+}
+
+/**
+ * Collects the leaves whose provisions a layer exposes, skipping the layers
+ * it `provide()`s internally.
+ */
+function exposedLeaves(root: AnyLayer): LeafNode[] {
+	const visited = new Set<LayerNode>();
+	const leaves: LeafNode[] = [];
+
+	const visit = (layer: AnyLayer): void => {
+		const node = layer[LayerNodeKey];
+		if (visited.has(node)) {
+			return;
+		}
+		visited.add(node);
+
+		switch (node.kind) {
+			case 'leaf':
+				leaves.push(node);
+				return;
+			case 'singleton':
+				visit(node.layer);
+				return;
+			case 'provide':
+				visit(node.target);
+				return;
+			case 'merge':
+				for (const child of node.layers) {
+					visit(child);
+				}
+				return;
+			case 'override':
+				visit(node.base);
+				return;
+		}
+	};
+
+	visit(root);
+	return leaves;
 }
 
 function registerAll(leaves: readonly LeafNode[]): Map<AnyTag, Provider[]> {
@@ -189,13 +250,26 @@ function distinctProviders(candidates: readonly Provider[]): Provider[] {
  * Each layer object is applied once regardless of how many composition paths
  * reach it, so the result does not depend on composition order.
  *
+ * @param options.childScope - Whether the providers are built into a child scope
+ * @throws {SingletonInChildScopeError} If `childScope` is set and the layer contains a singleton
  * @throws {DuplicateProviderError} If two different layers provide the same tag
  * @throws {DuplicateOverrideError} If two different overrides replace the same tag
  * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
  * @internal
  */
-export function resolveProviders(root: AnyLayer): Provider[] {
-	const { regular, overrides } = collectLeaves(root);
+export function resolveProviders(
+	root: AnyLayer,
+	options: { childScope: boolean }
+): Provider[] {
+	const { regular, overrides, singletons } = collectLeaves(root);
+
+	const [singleton] = singletons;
+	if (options.childScope && singleton !== undefined) {
+		throw new SingletonInChildScopeError(
+			[...registerAll(exposedLeaves(singleton.layer)).keys()],
+			formatSite(singleton.site)
+		);
+	}
 
 	const resolved = new Map<AnyTag, Provider>();
 	for (const [tag, candidates] of registerAll(regular)) {

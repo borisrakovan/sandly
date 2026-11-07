@@ -373,11 +373,34 @@ const userLayer = Layer.service(UserService, [Database]);
 const appLayer = userLayer.provide(dbLayer);
 // Type: Layer<never, typeof UserService>
 
-// Container.from only accepts layers with no requirements
+// Container.from only accepts layers with all requirements satisfied
 const container = Container.from(appLayer); // OK
 
 const incomplete = Layer.service(UserService, [Database]);
 const container = Container.from(incomplete); // Type error!
+```
+
+The type error names exactly what is missing, even when the layer's own type is too long for the compiler to print:
+
+```
+Property ''sandly/missing-dependencies'' is missing in type 'Layer<typeof Database, typeof UserService>'
+but required in type 'MissingDependencies<typeof Database>'.
+```
+
+A generic function that passes a layer on to `Container.from` / `ScopedContainer.from` or `childFrom` forwards the check with `SatisfiedAtRoot` or `SatisfiedByParent`:
+
+```typescript
+function createRequestScope<
+	TParentTags extends AnyTag,
+	TRequires extends AnyTag,
+	TProvides extends AnyTag,
+>(
+	parent: ScopedContainer<TParentTags>,
+	layer: Layer<TRequires, TProvides> &
+		SatisfiedByParent<TRequires, TParentTags>
+) {
+	return parent.childFrom('request', layer);
+}
 ```
 
 ### How Layers Are Built
@@ -409,6 +432,38 @@ const testLayer = checkoutLayer
 ```
 
 An override for a tag that nothing else in the build provides throws `OverrideTargetNotFoundError`, so stale overrides cannot linger. Overrides apply to the container being built: in a child scope they replace only the child's providers, never instances the parent owns.
+
+### Singletons
+
+Some dependencies must exist once per application: a connection pool, a client that holds a cache, an SDK wrapper. Declare them with `Layer.singleton()`, which takes the same arguments as `Layer.service()` or wraps an existing layer:
+
+```typescript
+const database = Layer.singleton(Database, [DatabaseConfig], {
+	cleanup: (db) => db.close(),
+});
+// Type: Layer<typeof DatabaseConfig | Root<typeof Database>, typeof Database>
+
+const redisClient = Layer.singleton(
+	Layer.create({
+		requires: [RedisConfig],
+		apply: (builder) =>
+			builder.add(RedisClient, async (ctx) =>
+				connect(await ctx.resolve(RedisConfig))
+			),
+	})
+);
+```
+
+A singleton layer requires `Root<...>`, which only root containers (`Container.from`, `ScopedContainer.from`) satisfy. The requirement travels through `provide()` and `merge()`, so `childFrom` rejects a layer that contains a singleton anywhere inside it. Child scopes depend on the singleton's tag and resolve the root's instance:
+
+```typescript
+const app = ScopedContainer.from('app', database.provide(configLayer));
+
+app.childFrom('request', userService); // OK: resolves the app's Database
+app.childFrom('request', userService.provide(database)); // Type error: SingletonInChildScope<typeof Database>
+```
+
+The rule is also enforced when the container is built: a child scope whose layer contains a singleton throws `SingletonInChildScopeError`, even if the type error was suppressed.
 
 ## Scoped Containers
 
@@ -504,6 +559,7 @@ Building a container from a layer (`Container.from`, `ScopedContainer.from`, `ch
 - `DuplicateProviderError`: two different layers provide the same tag
 - `DuplicateOverrideError`: two different overrides replace the same tag
 - `OverrideTargetNotFoundError`: an override replaces a tag nothing else provides
+- `SingletonInChildScopeError`: a child scope's layer contains a `Layer.singleton()`
 
 Resolving a `Layer.unused()` placeholder fails with `UnusedDependencyResolvedError` as the root cause.
 
@@ -524,26 +580,28 @@ Resolving a `Layer.unused()` placeholder fails with `UnusedDependencyResolvedErr
 
 ### ContainerBuilder
 
-| Method                   | Description           |
-| ------------------------ | --------------------- |
+| Method                   | Description                          |
+| ------------------------ | ------------------------------------ |
 | `builder.add(tag, spec)` | Register a dependency (once per tag) |
 | `builder.build()`        | Create the container                 |
 
 ### Layer
 
-| Method                                 | Description                                     |
-| -------------------------------------- | ----------------------------------------------- |
-| `Layer.service(class, deps, options?)` | Create layer for a class                        |
-| `Layer.value(tag, value)`              | Create layer for a constant value               |
-| `Layer.mock(tag, implementation)`      | Create layer with mock (partial for ServiceTag) |
-| `Layer.create({ requires, apply })`    | Create custom layer                             |
-| `Layer.empty()`                        | Create empty layer                              |
-| `Layer.unused(...tags)`                | Placeholders for tags that are never resolved   |
-| `Layer.merge(a, b)`                    | Merge two layers (smart subtraction)            |
-| `Layer.mergeAll(...layers)`            | Merge multiple layers (smart subtraction)       |
-| `layer.provide(dep)`                   | Satisfy dependencies, expose only target's      |
-| `layer.merge(other)`                   | Merge layers, expose both, subtract satisfied   |
-| `layer.override(replacement)`          | Replace providers anywhere in the composition   |
+| Method                                   | Description                                     |
+| ---------------------------------------- | ----------------------------------------------- |
+| `Layer.service(class, deps, options?)`   | Create layer for a class                        |
+| `Layer.singleton(class, deps, options?)` | Create layer for a class built only at the root |
+| `Layer.singleton(layer)`                 | Mark a layer as built only at the root          |
+| `Layer.value(tag, value)`                | Create layer for a constant value               |
+| `Layer.mock(tag, implementation)`        | Create layer with mock (partial for ServiceTag) |
+| `Layer.create({ requires, apply })`      | Create custom layer                             |
+| `Layer.empty()`                          | Create empty layer                              |
+| `Layer.unused(...tags)`                  | Placeholders for tags that are never resolved   |
+| `Layer.merge(a, b)`                      | Merge two layers (smart subtraction)            |
+| `Layer.mergeAll(...layers)`              | Merge multiple layers (smart subtraction)       |
+| `layer.provide(dep)`                     | Satisfy dependencies, expose only target's      |
+| `layer.merge(other)`                     | Merge layers, expose both, subtract satisfied   |
+| `layer.override(replacement)`            | Replace providers anywhere in the composition   |
 
 ### ScopedContainer
 

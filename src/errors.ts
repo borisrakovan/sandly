@@ -209,6 +209,23 @@ export class UnusedDependencyResolvedError extends SandlyError {
 }
 
 /**
+ * Error thrown when a layer passed to a child scope contains a
+ * `Layer.singleton()`.
+ *
+ * Singletons belong to the root container; a child scope resolves them from
+ * its parent by requiring their tags instead of providing their layers.
+ */
+export class SingletonInChildScopeError extends SandlyError {
+	constructor(tags: readonly AnyTag[], definitionSite: string | undefined) {
+		const ids = tags.map((tag) => Tag.id(tag));
+		super(
+			`Singleton ${ids.map((id) => `"${id}"`).join(', ')} cannot be built in a child scope${formatSites([definitionSite])}`,
+			{ detail: { tags: ids, definitionSite } }
+		);
+	}
+}
+
+/**
  * Error thrown when a circular dependency is detected during resolution.
  *
  * @example

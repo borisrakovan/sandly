@@ -17,6 +17,7 @@ import {
 	type LeafNode,
 	resolveProviders,
 } from './layer-graph.js';
+import type { Root } from './requirements.js';
 import { AnyTag, ServiceTag, Tag, TagType, ValueTag } from './tag.js';
 import { Contravariant, Covariant } from './types.js';
 
@@ -140,6 +141,7 @@ type UnionOfProvides<T extends readonly AnyLayer[]> = {
  * - A layer object reached through several composition paths is applied once.
  * - Two different layers providing the same tag throw {@link DuplicateProviderError}.
  * - {@link Layer.override} replaces a provider deliberately, wherever it sits.
+ * - A layer containing a {@link Layer.singleton} builds only into a root container.
  *
  * @template TRequires - The union of tags this layer requires
  * @template TProvides - The union of tags this layer provides
@@ -173,6 +175,7 @@ export interface Layer<TRequires extends AnyTag, TProvides extends AnyTag> {
 	 * Registers this layer's providers, one per tag, on a container builder.
 	 * Works with both ContainerBuilder and ScopedContainerBuilder.
 	 *
+	 * @throws {SingletonInChildScopeError} If the builder creates a child scope and the layer contains a singleton
 	 * @throws {DuplicateProviderError} If two different layers provide the same tag, or the builder already has one of the tags
 	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
 	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
@@ -270,8 +273,11 @@ function createLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
 		[LayerNodeKey]: node,
 
 		apply(builder) {
+			const childScope =
+				builder instanceof ScopedContainerBuilder &&
+				builder._isChildScope;
 			let current: IContainerBuilder<AnyTag> = builder;
-			for (const provider of resolveProviders(layer)) {
+			for (const provider of resolveProviders(layer, { childScope })) {
 				current = current.add(provider.tag, provider.spec);
 			}
 			// Builders return themselves from add(); only the tag type changes.
@@ -310,6 +316,103 @@ function createLeafLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
 	leaf: Omit<LeafNode, 'kind'>
 ): Layer<TRequires, TProvides> {
 	return createLayer({ kind: 'leaf', ...leaf });
+}
+
+/**
+ * Registers a class constructed from its dependency list: tags are resolved,
+ * raw values are passed through.
+ * @internal
+ */
+function serviceRegistration<TClass extends ServiceTag>(
+	cls: TClass,
+	deps: readonly unknown[],
+	options: { cleanup?: Finalizer<InstanceType<TClass>> } | undefined
+): LeafNode['register'] {
+	return (builder) => {
+		builder.add(cls, {
+			create: async (
+				ctx: ResolutionContext<AnyTag>
+			): Promise<InstanceType<TClass>> => {
+				// Resolve tags, pass through raw values
+				const args = await Promise.all(
+					deps.map((dep) => (Tag.isTag(dep) ? ctx.resolve(dep) : dep))
+				);
+
+				return new cls(...args) as InstanceType<TClass>;
+			},
+			cleanup: options?.cleanup,
+		});
+	};
+}
+
+/**
+ * Creates a layer for a dependency that must have exactly one instance per
+ * application, such as a connection pool, a client holding a cache, or an SDK
+ * wrapper. Takes the same arguments as `Layer.service()`.
+ *
+ * The layer carries a {@link Root} requirement that only `Container.from` and
+ * `ScopedContainer.from` satisfy, so any composition that contains it builds
+ * only into a root container. Passing it to `childFrom` is a compile error,
+ * and building it into a child scope throws {@link SingletonInChildScopeError}.
+ * Layers built in child scopes depend on the singleton's tag and resolve the
+ * root's instance.
+ *
+ * @example
+ * ```typescript
+ * const database = Layer.singleton(Database, [DatabaseConfig], {
+ *   cleanup: (db) => db.close(),
+ * });
+ * // Type: Layer<typeof DatabaseConfig | Root<typeof Database>, typeof Database>
+ *
+ * const app = ScopedContainer.from('app', database.provide(configLayer));
+ * const request = app.childFrom('request', userService); // requires Database from the parent
+ * ```
+ */
+function singleton<
+	TClass extends ServiceTag,
+	const TDeps extends readonly unknown[],
+>(
+	cls: TClass,
+	deps: TDeps & ValidDepsFor<ConstructorParameters<TClass>>,
+	options?: { cleanup?: Finalizer<InstanceType<TClass>> }
+): Layer<ExtractTags<TDeps> | Root<TClass>, TClass>;
+/**
+ * Marks an existing layer, typically one from `Layer.create()`, as a
+ * singleton: the layer and any composition containing it build only into a
+ * root container.
+ *
+ * The wrapped layer itself is unchanged; using it unwrapped elsewhere in the
+ * same build is not a conflict.
+ *
+ * @example
+ * ```typescript
+ * const redisClient = Layer.singleton(
+ *   Layer.create({
+ *     requires: [RedisConfig],
+ *     apply: (builder) =>
+ *       builder.add(RedisClient, async (ctx) => connect(await ctx.resolve(RedisConfig))),
+ *   })
+ * );
+ * // Type: Layer<typeof RedisConfig | Root<typeof RedisClient>, typeof RedisClient>
+ * ```
+ */
+function singleton<TRequires extends AnyTag, TProvides extends AnyTag>(
+	layer: Layer<TRequires, TProvides>
+): Layer<TRequires | Root<TProvides>, TProvides>;
+function singleton(
+	source: ServiceTag | AnyLayer,
+	deps?: readonly unknown[],
+	options?: { cleanup?: Finalizer<unknown> }
+): Layer<AnyTag, never> {
+	const site = definitionSiteOf('singleton');
+	const layer =
+		typeof source === 'function'
+			? createLeafLayer({
+					site,
+					register: serviceRegistration(source, deps ?? [], options),
+				})
+			: source;
+	return createLayer({ kind: 'singleton', layer, site });
 }
 
 /**
@@ -371,25 +474,11 @@ export const Layer = {
 	): Layer<ExtractTags<TDeps>, TClass> {
 		return createLeafLayer({
 			site: definitionSiteOf('service'),
-			register: (builder) => {
-				builder.add(cls, {
-					create: async (
-						ctx: ResolutionContext<AnyTag>
-					): Promise<InstanceType<TClass>> => {
-						// Resolve tags, pass through raw values
-						const args = await Promise.all(
-							deps.map((dep) =>
-								Tag.isTag(dep) ? ctx.resolve(dep) : dep
-							)
-						);
-
-						return new cls(...args) as InstanceType<TClass>;
-					},
-					cleanup: options?.cleanup,
-				});
-			},
+			register: serviceRegistration(cls, deps, options),
 		});
 	},
+
+	singleton,
 
 	/**
 	 * Creates a layer that provides a constant value or pre-instantiated instance.

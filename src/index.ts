@@ -28,6 +28,7 @@ export {
 	DuplicateProviderError,
 	OverrideTargetNotFoundError,
 	SandlyError,
+	SingletonInChildScopeError,
 	UnknownDependencyError,
 	UnusedDependencyResolvedError,
 } from './errors.js';
@@ -36,6 +37,15 @@ export type { ErrorDump } from './errors.js';
 // Layer
 export { Layer } from './layer.js';
 export type { AnyLayer, Layer as LayerInterface } from './layer.js';
+
+// Requirements
+export type {
+	MissingDependencies,
+	Root,
+	SatisfiedAtRoot,
+	SatisfiedByParent,
+	SingletonInChildScope,
+} from './requirements.js';
 
 // Tag
 export { Tag } from './tag.js';

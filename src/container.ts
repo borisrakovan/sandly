@@ -7,6 +7,7 @@ import {
 	UnknownDependencyError,
 } from './errors.js';
 import { Layer } from './layer.js';
+import type { SatisfiedAtRoot, SatisfiedByParent } from './requirements.js';
 import { AnyTag, TagType } from './tag.js';
 import { Contravariant, PromiseOrValue } from './types.js';
 
@@ -343,7 +344,7 @@ export class Container<
 	 * This is a convenience method equivalent to applying a layer to
 	 * `Container.builder()` and building the result.
 	 *
-	 * @param layer - A layer with no requirements (all dependencies satisfied)
+	 * @param layer - A layer with all dependencies satisfied; a compile error names any missing ones
 	 * @throws {DuplicateProviderError} If two different layers provide the same tag
 	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
 	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
@@ -356,8 +357,8 @@ export class Container<
 	 * const db = await container.resolve(Database);
 	 * ```
 	 */
-	static from<TProvides extends AnyTag>(
-		layer: Layer<never, TProvides>
+	static from<TRequires extends AnyTag, TProvides extends AnyTag>(
+		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
 	): Container<TProvides> {
 		const builder = Container.builder();
 		const resultBuilder = layer.apply(builder);
@@ -564,6 +565,14 @@ export class ScopedContainerBuilder<TTags extends AnyTag = never> {
 	) {}
 
 	/**
+	 * Whether this builder creates a child scope rather than a root container.
+	 * @internal
+	 */
+	get _isChildScope(): boolean {
+		return this.parent !== null;
+	}
+
+	/**
 	 * Registers a dependency with a factory function or lifecycle object.
 	 *
 	 * A tag registered in a parent scope may be registered again here; this
@@ -689,7 +698,7 @@ export class ScopedContainer<
 	 * `ScopedContainer.builder()` and building the result.
 	 *
 	 * @param scope - Identifier for the scope (for debugging)
-	 * @param layer - A layer with no requirements (all dependencies satisfied)
+	 * @param layer - A layer with all dependencies satisfied; a compile error names any missing ones
 	 * @throws {DuplicateProviderError} If two different layers provide the same tag
 	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
 	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
@@ -702,9 +711,9 @@ export class ScopedContainer<
 	 * const db = await container.resolve(Database);
 	 * ```
 	 */
-	static override from<TProvides extends AnyTag>(
+	static override from<TRequires extends AnyTag, TProvides extends AnyTag>(
 		scope: Scope,
-		layer: Layer<never, TProvides>
+		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
 	): ScopedContainer<TProvides> {
 		const builder = ScopedContainer.builder(scope);
 		const resultBuilder = layer.apply(builder);
@@ -793,8 +802,13 @@ export class ScopedContainer<
 	 * The layer's providers shadow parent providers of the same tags. Overrides
 	 * replace only providers within the child's layer.
 	 *
+	 * The layer must not contain a `Layer.singleton()`: singletons belong to the
+	 * root container, and the child resolves them from it by requiring their
+	 * tags. The compiler rejects such a layer, and building it throws.
+	 *
 	 * @param scope - Identifier for the child scope
-	 * @param layer - Layer to apply to the child (can require parent's tags)
+	 * @param layer - Layer to apply to the child; may require the parent's tags, and a compile error names any other requirements
+	 * @throws {SingletonInChildScopeError} If the layer contains a singleton
 	 * @throws {DuplicateProviderError} If two different layers provide the same tag
 	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
 	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer in the child provides
@@ -810,11 +824,14 @@ export class ScopedContainer<
 	 * const users = await requestContainer.resolve(UserService);
 	 * ```
 	 */
-	childFrom<TProvides extends AnyTag>(
+	childFrom<TRequires extends AnyTag, TProvides extends AnyTag>(
 		scope: Scope,
-		layer: Layer<TTags, TProvides>
+		layer: Layer<TRequires, TProvides> & SatisfiedByParent<TRequires, TTags>
 	): ScopedContainer<TTags | TProvides> {
-		return layer.apply(this.child(scope)).build();
+		// The parameter type checks that the parent provides TRequires.
+		return layer.apply(this.child(scope)).build() as ScopedContainer<
+			TTags | TProvides
+		>;
 	}
 
 	/**

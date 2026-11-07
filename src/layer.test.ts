@@ -5,10 +5,18 @@ import {
 	DuplicateOverrideError,
 	DuplicateProviderError,
 	OverrideTargetNotFoundError,
+	SingletonInChildScopeError,
 	UnusedDependencyResolvedError,
 } from './errors.js';
 import { Layer } from './layer.js';
-import { Tag } from './tag.js';
+import type {
+	MissingDependencies,
+	Root,
+	SatisfiedAtRoot,
+	SatisfiedByParent,
+	SingletonInChildScope,
+} from './requirements.js';
+import { type AnyTag, Tag } from './tag.js';
 
 describe('Layer', () => {
 	describe('Layer.service()', () => {
@@ -977,6 +985,230 @@ describe('Layer', () => {
 			);
 
 			expect(() => Container.from(layer)).toThrow(DuplicateProviderError);
+		});
+	});
+
+	describe('Layer.singleton()', () => {
+		class Config {
+			url = 'postgres://localhost';
+		}
+		class Database {
+			constructor(public config: Config) {}
+		}
+		class UserService {
+			constructor(public db: Database) {}
+		}
+
+		const configLayer = Layer.value(Config, new Config());
+		const database = Layer.singleton(Database, [Config]);
+		const userService = Layer.service(UserService, [Database]);
+
+		it('should carry a Root requirement through composition', () => {
+			expectTypeOf(database).toEqualTypeOf<
+				Layer<typeof Config | Root<typeof Database>, typeof Database>
+			>();
+			expectTypeOf(userService.provide(database)).toEqualTypeOf<
+				Layer<typeof Config | Root<typeof Database>, typeof UserService>
+			>();
+		});
+
+		it('should build into a root container', async () => {
+			const container = Container.from(
+				userService.provide(database).provide(configLayer)
+			);
+			const scoped = ScopedContainer.from(
+				'app',
+				database.provide(configLayer)
+			);
+
+			expect((await container.resolve(UserService)).db).toBeInstanceOf(
+				Database
+			);
+			expect(await scoped.resolve(Database)).toBeInstanceOf(Database);
+		});
+
+		it("should let a child scope resolve the root's instance", async () => {
+			const app = ScopedContainer.from(
+				'app',
+				database.provide(configLayer)
+			);
+
+			const request = app.childFrom('request', userService);
+
+			expect((await request.resolve(UserService)).db).toBe(
+				await app.resolve(Database)
+			);
+		});
+
+		it('should reject a child scope layer containing a singleton', () => {
+			const app = ScopedContainer.from('app', configLayer);
+
+			expect(() =>
+				// @ts-expect-error - SingletonInChildScope<typeof Database>
+				app.childFrom('request', userService.provide(database))
+			).toThrow(SingletonInChildScopeError);
+		});
+
+		it('should name the singleton and its definition site in the error', () => {
+			const app = ScopedContainer.from('app', configLayer);
+
+			expect(() =>
+				// @ts-expect-error - SingletonInChildScope<typeof Database>
+				app.childFrom('request', database)
+			).toThrow(
+				/Singleton "Database" cannot be built in a child scope\n {2}- .*layer\.test\.ts:\d+:\d+/
+			);
+		});
+
+		it('should reject a singleton applied to a child builder directly', () => {
+			const app = ScopedContainer.from('app', configLayer);
+
+			expect(() => database.apply(app.child('request'))).toThrow(
+				SingletonInChildScopeError
+			);
+		});
+
+		it('should reject a singleton in a child scope even when an override replaces it', () => {
+			const app = ScopedContainer.from('app', configLayer);
+			const layer = userService
+				.provide(database)
+				.override(Layer.mock(Database, {}));
+
+			// @ts-expect-error - SingletonInChildScope<typeof Database>
+			expect(() => app.childFrom('request', layer)).toThrow(
+				SingletonInChildScopeError
+			);
+		});
+
+		it('should wrap an existing layer', async () => {
+			const databaseFactory = Layer.create({
+				requires: [Config],
+				apply: (builder) =>
+					builder.add(
+						Database,
+						async (ctx) => new Database(await ctx.resolve(Config))
+					),
+			});
+			const wrapped = Layer.singleton(databaseFactory);
+
+			expectTypeOf(wrapped).toEqualTypeOf<
+				Layer<typeof Config | Root<typeof Database>, typeof Database>
+			>();
+			const app = ScopedContainer.from(
+				'app',
+				wrapped.provide(configLayer)
+			);
+			expect(await app.resolve(Database)).toBeInstanceOf(Database);
+			expect(() =>
+				// @ts-expect-error - SingletonInChildScope<typeof Database>
+				app.childFrom('request', wrapped)
+			).toThrow(SingletonInChildScopeError);
+		});
+
+		it('should leave the wrapped layer usable on its own', async () => {
+			const databaseLayer = Layer.service(Database, [Config]);
+			const layer = Layer.singleton(databaseLayer)
+				.merge(userService.provide(databaseLayer))
+				.provide(configLayer);
+			const app = ScopedContainer.from('app', layer);
+
+			const request = app.childFrom(
+				'request',
+				databaseLayer.provide(configLayer)
+			);
+
+			expect((await app.resolve(UserService)).db).toBe(
+				await app.resolve(Database)
+			);
+			expect(await request.resolve(Database)).not.toBe(
+				await app.resolve(Database)
+			);
+		});
+
+		it('should run the cleanup of a class singleton', async () => {
+			const cleanup = vi.fn();
+			const container = Container.from(
+				Layer.singleton(Database, [Config], { cleanup }).provide(
+					configLayer
+				)
+			);
+			const db = await container.resolve(Database);
+
+			await container.destroy();
+
+			expect(cleanup).toHaveBeenCalledWith(db);
+		});
+	});
+
+	describe('requirement checks', () => {
+		class Config {
+			url = 'postgres://localhost';
+		}
+		class Logger {
+			level = 'info';
+		}
+		class Database {
+			constructor(public config: Config) {}
+		}
+		class AuditLog {
+			constructor(public logger: Logger) {}
+		}
+
+		it('should name the missing dependencies of a root layer', () => {
+			expectTypeOf<
+				SatisfiedAtRoot<typeof Config | Root<typeof Database>>
+			>().toEqualTypeOf<MissingDependencies<typeof Config>>();
+			expectTypeOf<
+				SatisfiedAtRoot<Root<typeof Database>>
+			>().toEqualTypeOf<unknown>();
+		});
+
+		it('should name the missing dependencies and singletons of a child layer', () => {
+			expectTypeOf<
+				SatisfiedByParent<
+					typeof Config | typeof Logger | Root<typeof Database>,
+					typeof Logger
+				>
+			>().toEqualTypeOf<
+				MissingDependencies<typeof Config> &
+					SingletonInChildScope<typeof Database>
+			>();
+			expectTypeOf<
+				SatisfiedByParent<typeof Logger, typeof Logger>
+			>().toEqualTypeOf<unknown>();
+		});
+
+		it('should accept untyped layers', () => {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			expectTypeOf<SatisfiedAtRoot<any>>().toEqualTypeOf<unknown>();
+			expectTypeOf<
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				SatisfiedByParent<any, typeof Logger>
+			>().toEqualTypeOf<unknown>();
+		});
+
+		it('should let a generic wrapper forward the child check', async () => {
+			function scoped<
+				TParentTags extends AnyTag,
+				TRequires extends AnyTag,
+				TProvides extends AnyTag,
+			>(
+				parent: ScopedContainer<TParentTags>,
+				layer: Layer<TRequires, TProvides> &
+					SatisfiedByParent<TRequires, TParentTags>
+			) {
+				return parent.childFrom('scoped', layer);
+			}
+			const app = ScopedContainer.from(
+				'app',
+				Layer.value(Config, new Config())
+			);
+
+			const child = scoped(app, Layer.service(Database, [Config]));
+
+			expect(await child.resolve(Database)).toBeInstanceOf(Database);
+			// @ts-expect-error - MissingDependencies<typeof Logger>
+			scoped(app, Layer.service(AuditLog, [Logger]));
 		});
 	});
 
