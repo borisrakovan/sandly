@@ -166,6 +166,27 @@ function registerSpec<TTags extends AnyTag>(
 }
 
 /**
+ * Creates the error that `await using` throws when disposal fails while another
+ * error propagates. Runtimes without a native `SuppressedError` get a plain
+ * `Error` with the same name and fields.
+ *
+ * @param error - The disposal failure
+ * @param suppressed - The error that was propagating
+ * @internal
+ */
+function suppressedError(error: unknown, suppressed: unknown): Error {
+	const message = 'An error was suppressed during disposal';
+	if (typeof SuppressedError === 'function') {
+		return new SuppressedError(error, suppressed, message);
+	}
+	return Object.assign(new Error(message), {
+		name: 'SuppressedError',
+		error,
+		suppressed,
+	});
+}
+
+/**
  * Builder for constructing immutable containers.
  *
  * Use `Container.builder()` to create a builder, then chain `.add()` calls
@@ -475,6 +496,7 @@ export class Container<
 	 *
 	 * This is a convenience method for the common "create, use, destroy" pattern.
 	 * The container is always destroyed after the callback completes, even if it throws.
+	 * Errors propagate as they would from an `await using` declaration.
 	 *
 	 * @param tag - The dependency tag to resolve
 	 * @param fn - Callback that receives the resolved service
@@ -484,6 +506,9 @@ export class Container<
 	 * @throws {CircularDependencyError} If a circular dependency is detected
 	 * @throws {DependencyCreationError} If the factory function throws
 	 * @throws {DependencyFinalizationError} If the finalizer function throws
+	 * @throws {SuppressedError} If resolution or the callback throws and a finalizer
+	 *   throws too: `error` is the `DependencyFinalizationError`, `suppressed` the
+	 *   original error
 	 *
 	 * @example
 	 * ```typescript
@@ -497,12 +522,20 @@ export class Container<
 		tag: T,
 		fn: (service: TagType<T>) => PromiseOrValue<R>
 	): Promise<R> {
+		let result: R;
 		try {
 			const service = await this.resolve(tag);
-			return await fn(service);
-		} finally {
-			await this.destroy();
+			result = await fn(service);
+		} catch (error) {
+			try {
+				await this.destroy();
+			} catch (destroyError) {
+				throw suppressedError(destroyError, error);
+			}
+			throw error;
 		}
+		await this.destroy();
+		return result;
 	}
 
 	/**

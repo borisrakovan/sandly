@@ -276,6 +276,8 @@ async function handleRecord(record: SqsRecord) {
 } // container.destroy() runs here
 ```
 
+Both report a failed cleanup the same way. If the operation throws and a finalizer throws too, the rejection is a `SuppressedError`: its `error` is the `DependencyFinalizationError` and its `suppressed` is the operation's error, so neither is lost.
+
 ## Working with Layers
 
 ### Creating Layers

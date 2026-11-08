@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	Container,
 	ScopedContainer,
@@ -689,6 +689,65 @@ describe('Container', () => {
 				// @ts-expect-error - MissingService is not registered
 				container.useOnce(MissingService, () => 'never reached')
 			).rejects.toThrow(UnknownDependencyError);
+		});
+
+		describe('when a finalizer throws', () => {
+			class TestService {}
+			const callbackError = new Error('Callback error');
+
+			const buildContainer = () =>
+				Container.builder()
+					.add(TestService, {
+						create: () => new TestService(),
+						cleanup: () => {
+							throw new Error('Finalizer error');
+						},
+					})
+					.build();
+
+			afterEach(() => {
+				vi.unstubAllGlobals();
+			});
+
+			it('should reject with the finalization error after a successful callback', async () => {
+				await expect(
+					buildContainer().useOnce(TestService, () => 'done')
+				).rejects.toThrow(DependencyFinalizationError);
+			});
+
+			it('should keep the callback error as the suppressed error', async () => {
+				const error = (await buildContainer()
+					.useOnce(TestService, () => {
+						throw callbackError;
+					})
+					.catch((err: unknown) => err)) as SuppressedError;
+
+				expect(error.name).toBe('SuppressedError');
+				expect(error.error).toBeInstanceOf(DependencyFinalizationError);
+				expect(error.suppressed).toBe(callbackError);
+			});
+
+			it('should use the native SuppressedError when the runtime has one', async () => {
+				class NativeSuppressedError extends Error {
+					constructor(
+						readonly error: unknown,
+						readonly suppressed: unknown,
+						message?: string
+					) {
+						super(message);
+					}
+				}
+				vi.stubGlobal('SuppressedError', NativeSuppressedError);
+
+				const error = await buildContainer()
+					.useOnce(TestService, () => {
+						throw callbackError;
+					})
+					.catch((err: unknown) => err);
+
+				expect(error).toBeInstanceOf(NativeSuppressedError);
+				expect(error).toHaveProperty('suppressed', callbackError);
+			});
 		});
 	});
 
