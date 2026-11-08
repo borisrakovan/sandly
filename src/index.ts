@@ -40,10 +40,10 @@ export type { AnyLayer, Layer as LayerInterface } from './layer.js';
 
 // Requirements
 export type {
+	ChildLayer,
 	MissingDependencies,
 	Root,
-	SatisfiedAtRoot,
-	SatisfiedByParent,
+	RootLayer,
 	SingletonInChildScope,
 } from './requirements.js';
 

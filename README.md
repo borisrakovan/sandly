@@ -412,7 +412,7 @@ Property ''sandly/missing-dependencies'' is missing in type 'Layer<typeof Databa
 but required in type 'MissingDependencies<typeof Database>'.
 ```
 
-A generic function that passes a layer on to `Container.from` / `ScopedContainer.from` or `childFrom` forwards the check with `SatisfiedAtRoot` or `SatisfiedByParent`:
+A generic function that passes a layer on to `Container.from` / `ScopedContainer.from` or `childFrom` forwards the check by typing it as `RootLayer` or `ChildLayer`:
 
 ```typescript
 function createRequestScope<
@@ -421,8 +421,7 @@ function createRequestScope<
 	TProvides extends AnyTag,
 >(
 	parent: ScopedContainer<TParentTags>,
-	layer: Layer<TRequires, TProvides> &
-		SatisfiedByParent<TRequires, TParentTags>
+	layer: ChildLayer<TRequires, TProvides, TParentTags>
 ) {
 	return parent.childFrom('request', layer);
 }

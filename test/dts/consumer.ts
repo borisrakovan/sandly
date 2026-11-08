@@ -1,4 +1,12 @@
-import { Container, Layer, ScopedContainer, Tag } from 'sandly';
+import {
+	type AnyTag,
+	type ChildLayer,
+	Container,
+	Layer,
+	type RootLayer,
+	ScopedContainer,
+	Tag,
+} from 'sandly';
 
 class Database {}
 
@@ -23,3 +31,22 @@ export async function handleRequest(
 	);
 	return request.resolve(UserService);
 }
+
+export function createRoot<TRequires extends AnyTag, TProvides extends AnyTag>(
+	layer: RootLayer<TRequires, TProvides>
+): ScopedContainer<TProvides> {
+	return ScopedContainer.from('root', layer);
+}
+
+export function createChild<
+	TParentTags extends AnyTag,
+	TRequires extends AnyTag,
+	TProvides extends AnyTag,
+>(
+	parent: ScopedContainer<TParentTags>,
+	layer: ChildLayer<TRequires, TProvides, TParentTags>
+): ScopedContainer<TParentTags | TProvides> {
+	return parent.childFrom('child', layer);
+}
+
+export const singletonRoot = createRoot(Layer.singleton(Database, []));

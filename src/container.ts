@@ -6,8 +6,7 @@ import {
 	DuplicateProviderError,
 	UnknownDependencyError,
 } from './errors.js';
-import { Layer } from './layer.js';
-import type { SatisfiedAtRoot, SatisfiedByParent } from './requirements.js';
+import type { ChildLayer, RootLayer } from './requirements.js';
 import { AnyTag, TagType } from './tag.js';
 import { Contravariant, PromiseOrValue } from './types.js';
 
@@ -601,7 +600,7 @@ export class Container<
 	 * ```
 	 */
 	static from<TRequires extends AnyTag, TProvides extends AnyTag>(
-		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
+		layer: RootLayer<TRequires, TProvides>
 	): Container<TProvides> {
 		const builder = Container.builder();
 		const resultBuilder = layer.apply(builder);
@@ -777,7 +776,7 @@ export class ScopedContainer<
 	 */
 	static from<TRequires extends AnyTag, TProvides extends AnyTag>(
 		scope: Scope,
-		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
+		layer: RootLayer<TRequires, TProvides>
 	): ScopedContainer<TProvides> {
 		const builder = ScopedContainer.builder(scope);
 		const resultBuilder = layer.apply(builder);
@@ -890,7 +889,7 @@ export class ScopedContainer<
 	 */
 	childFrom<TRequires extends AnyTag, TProvides extends AnyTag>(
 		scope: Scope,
-		layer: Layer<TRequires, TProvides> & SatisfiedByParent<TRequires, TTags>
+		layer: ChildLayer<TRequires, TProvides, TTags>
 	): ScopedContainer<TTags | TProvides> {
 		// The parameter type checks that the parent provides TRequires.
 		return layer.apply(this.child(scope)).build() as ScopedContainer<

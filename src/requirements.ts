@@ -1,3 +1,4 @@
+import type { Layer } from './layer.js';
 import { type AnyTag, TagTypeKey, ValueTagIdKey } from './tag.js';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- type-only brand
@@ -61,17 +62,7 @@ type SingletonCheck<TTags> = [TTags] extends [never]
  * requirement other than {@link Root} is missing.
  *
  * Resolves to `unknown` when the requirements are satisfied, and to
- * {@link MissingDependencies} otherwise. Intersect a layer parameter with it
- * to forward the check from a generic wrapper:
- *
- * @example
- * ```typescript
- * function createApp<TRequires extends AnyTag, TProvides extends AnyTag>(
- *   layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
- * ) {
- *   return Container.from(layer);
- * }
- * ```
+ * {@link MissingDependencies} otherwise.
  */
 export type SatisfiedAtRoot<TRequires extends AnyTag> =
 	IsAny<TRequires> extends true
@@ -85,8 +76,6 @@ export type SatisfiedAtRoot<TRequires extends AnyTag> =
  *
  * Resolves to `unknown` when the check passes, and to
  * {@link MissingDependencies} and/or {@link SingletonInChildScope} otherwise.
- * Intersect a layer parameter with it to forward the check from a generic
- * wrapper (see {@link SatisfiedAtRoot}).
  */
 export type SatisfiedByParent<
 	TRequires extends AnyTag,
@@ -96,3 +85,38 @@ export type SatisfiedByParent<
 		? unknown
 		: MissingCheck<Exclude<TRequires, TParentTags | AnyRoot>> &
 				SingletonCheck<RootTags<Extract<TRequires, AnyRoot>>>;
+
+/**
+ * A layer a root container (`Container.from`, `ScopedContainer.from`) can
+ * build: it may contain singletons, and every other requirement is
+ * satisfied. Otherwise the compiler error names the missing tags.
+ *
+ * Type a generic wrapper's layer parameter with it to forward the check:
+ *
+ * @example
+ * ```typescript
+ * function createApp<TRequires extends AnyTag, TProvides extends AnyTag>(
+ *   layer: RootLayer<TRequires, TProvides>
+ * ) {
+ *   return Container.from(layer);
+ * }
+ * ```
+ */
+export type RootLayer<
+	TRequires extends AnyTag,
+	TProvides extends AnyTag,
+> = Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>;
+
+/**
+ * A layer `childFrom` can build on a parent providing `TParentTags`: the
+ * parent provides every requirement, and the layer contains no singleton.
+ * Otherwise the compiler error names the missing tags or the singleton.
+ *
+ * Type a generic wrapper's layer parameter with it to forward the check
+ * (see {@link RootLayer}).
+ */
+export type ChildLayer<
+	TRequires extends AnyTag,
+	TProvides extends AnyTag,
+	TParentTags extends AnyTag,
+> = Layer<TRequires, TProvides> & SatisfiedByParent<TRequires, TParentTags>;

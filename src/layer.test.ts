@@ -10,8 +10,10 @@ import {
 } from './errors.js';
 import { Layer } from './layer.js';
 import type {
+	ChildLayer,
 	MissingDependencies,
 	Root,
+	RootLayer,
 	SatisfiedAtRoot,
 	SatisfiedByParent,
 	SingletonInChildScope,
@@ -1241,8 +1243,7 @@ describe('Layer', () => {
 				TProvides extends AnyTag,
 			>(
 				parent: ScopedContainer<TParentTags>,
-				layer: Layer<TRequires, TProvides> &
-					SatisfiedByParent<TRequires, TParentTags>
+				layer: ChildLayer<TRequires, TProvides, TParentTags>
 			) {
 				return parent.childFrom('scoped', layer);
 			}
@@ -1256,6 +1257,31 @@ describe('Layer', () => {
 			expect(await child.resolve(Database)).toBeInstanceOf(Database);
 			// @ts-expect-error - MissingDependencies<typeof Logger>
 			scoped(app, Layer.service(AuditLog, [Logger]));
+			expect(() =>
+				scoped(
+					app,
+					// @ts-expect-error - SingletonInChildScope<typeof Database>
+					Layer.singleton(Database, [Config])
+				)
+			).toThrow(SingletonInChildScopeError);
+		});
+
+		it('should let a generic wrapper forward the root check', async () => {
+			function root<TRequires extends AnyTag, TProvides extends AnyTag>(
+				layer: RootLayer<TRequires, TProvides>
+			) {
+				return Container.from(layer);
+			}
+
+			const app = root(
+				Layer.singleton(Database, [Config]).provide(
+					Layer.value(Config, new Config())
+				)
+			);
+
+			expect(await app.resolve(Database)).toBeInstanceOf(Database);
+			// @ts-expect-error - MissingDependencies<typeof Config>
+			root(Layer.service(Database, [Config]));
 		});
 	});
 
