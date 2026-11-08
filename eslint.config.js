@@ -41,6 +41,8 @@ export default tseslint.config(
 		ignores: [
 			'**/dist/**',
 			'coverage/**',
+			// Built-declaration fixture: type-checked by `type:check:dist` after the build
+			'test/dts/**',
 			'eslint.config.js',
 			'**/*.local.*',
 		],

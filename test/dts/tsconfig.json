@@ -1,0 +1,14 @@
+{
+	// Type-checks the built declarations as a consumer would: skipLibCheck off,
+	// and the disposable types from `lib` rather than @types/node.
+	"compilerOptions": {
+		"target": "es2022",
+		"lib": ["es2022", "esnext.disposable"],
+		"module": "NodeNext",
+		"strict": true,
+		"noEmit": true,
+		"skipLibCheck": false,
+		"types": []
+	},
+	"files": ["consumer.ts"]
+}

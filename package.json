@@ -48,6 +48,7 @@
 		"lint": "eslint . --fix",
 		"lint:check": "eslint . --max-warnings=0",
 		"type:check": "tsc --noEmit",
+		"type:check:dist": "tsc -p test/dts",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"tag": "git tag v$(node -p \"require('./package.json').version\") && git push --tags",

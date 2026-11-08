@@ -50,3 +50,6 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: Type check built declarations
+        run: pnpm run type:check:dist
