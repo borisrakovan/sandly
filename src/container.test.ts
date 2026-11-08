@@ -589,7 +589,7 @@ describe('Container', () => {
 		});
 	});
 
-	describe('use()', () => {
+	describe('useOnce()', () => {
 		it('should resolve service and run callback', async () => {
 			class UserService {
 				getUsers() {
@@ -601,7 +601,7 @@ describe('Container', () => {
 				.add(UserService, () => new UserService())
 				.build();
 
-			const result = await container.use(UserService, (service) =>
+			const result = await container.useOnce(UserService, (service) =>
 				service.getUsers()
 			);
 
@@ -615,7 +615,7 @@ describe('Container', () => {
 				.add(TestService, () => new TestService())
 				.build();
 
-			await container.use(TestService, () => 'done');
+			await container.useOnce(TestService, () => 'done');
 
 			// Container should be destroyed
 			await expect(container.resolve(TestService)).rejects.toThrow(
@@ -631,7 +631,7 @@ describe('Container', () => {
 				.build();
 
 			await expect(
-				container.use(TestService, () => {
+				container.useOnce(TestService, () => {
 					throw new Error('Callback error');
 				})
 			).rejects.toThrow('Callback error');
@@ -642,7 +642,7 @@ describe('Container', () => {
 			);
 		});
 
-		it('should call finalizers when use completes', async () => {
+		it('should call finalizers when useOnce completes', async () => {
 			const cleanup = vi.fn();
 
 			class TestService {}
@@ -654,7 +654,7 @@ describe('Container', () => {
 				})
 				.build();
 
-			await container.use(TestService, () => 'done');
+			await container.useOnce(TestService, () => 'done');
 
 			expect(cleanup).toHaveBeenCalledTimes(1);
 		});
@@ -670,9 +670,12 @@ describe('Container', () => {
 				.add(TestService, () => new TestService())
 				.build();
 
-			const result = await container.use(TestService, async (service) => {
-				return service.fetchData();
-			});
+			const result = await container.useOnce(
+				TestService,
+				async (service) => {
+					return service.fetchData();
+				}
+			);
 
 			expect(result).toBe('async data');
 		});
@@ -684,8 +687,49 @@ describe('Container', () => {
 
 			await expect(
 				// @ts-expect-error - MissingService is not registered
-				container.use(MissingService, () => 'never reached')
+				container.useOnce(MissingService, () => 'never reached')
 			).rejects.toThrow(UnknownDependencyError);
+		});
+	});
+
+	describe('Symbol.asyncDispose', () => {
+		class TestService {}
+
+		it('should destroy the container when an await using scope exits', async () => {
+			const cleanup = vi.fn();
+			let disposed: Container<typeof TestService>;
+			{
+				await using container = Container.builder()
+					.add(TestService, {
+						create: () => new TestService(),
+						cleanup,
+					})
+					.build();
+				await container.resolve(TestService);
+				disposed = container;
+			}
+
+			expect(cleanup).toHaveBeenCalledTimes(1);
+			await expect(disposed.resolve(TestService)).rejects.toThrow(
+				ContainerDestroyedError
+			);
+		});
+
+		it('should destroy the container when the scope exits by throwing', async () => {
+			const cleanup = vi.fn();
+			const run = async () => {
+				await using container = Container.builder()
+					.add(TestService, {
+						create: () => new TestService(),
+						cleanup,
+					})
+					.build();
+				await container.resolve(TestService);
+				throw new Error('Job failed');
+			};
+
+			await expect(run()).rejects.toThrow('Job failed');
+			expect(cleanup).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -1211,7 +1255,7 @@ describe('ScopedContainer', () => {
 		});
 	});
 
-	describe('use()', () => {
+	describe('useOnce()', () => {
 		it('should resolve service and run callback', async () => {
 			class UserService {
 				getUsers() {
@@ -1223,7 +1267,7 @@ describe('ScopedContainer', () => {
 				.add(UserService, () => new UserService())
 				.build();
 
-			const result = await container.use(UserService, (service) =>
+			const result = await container.useOnce(UserService, (service) =>
 				service.getUsers()
 			);
 
@@ -1237,7 +1281,7 @@ describe('ScopedContainer', () => {
 				.add(TestService, () => new TestService())
 				.build();
 
-			await container.use(TestService, () => 'done');
+			await container.useOnce(TestService, () => 'done');
 
 			// Container should be destroyed
 			await expect(container.resolve(TestService)).rejects.toThrow(
@@ -1269,7 +1313,7 @@ describe('ScopedContainer', () => {
 					return new UserService(db);
 				})
 				.build()
-				.use(UserService, (service) => service.getUsers());
+				.useOnce(UserService, (service) => service.getUsers());
 
 			expect(result).toBe('data');
 		});
@@ -1302,8 +1346,8 @@ describe('ScopedContainer', () => {
 			await parent.resolve(ParentService);
 			await _child.resolve(ChildService);
 
-			// use() on parent should destroy both parent and child
-			await parent.use(ParentService, () => 'done');
+			// useOnce() on parent should destroy both parent and child
+			await parent.useOnce(ParentService, () => 'done');
 
 			expect(destroyOrder).toEqual(['child', 'parent']);
 		});
@@ -1319,9 +1363,43 @@ describe('ScopedContainer', () => {
 
 			const container = ScopedContainer.from('app', databaseLayer);
 
-			const result = await container.use(Database, (db) => db.query());
+			const result = await container.useOnce(Database, (db) =>
+				db.query()
+			);
 
 			expect(result).toBe('data');
+		});
+	});
+
+	describe('Symbol.asyncDispose', () => {
+		it('should destroy children before the parent', async () => {
+			const destroyOrder: string[] = [];
+			class ParentService {}
+			class ChildService {}
+
+			{
+				await using parent = ScopedContainer.builder('app')
+					.add(ParentService, {
+						create: () => new ParentService(),
+						cleanup: () => {
+							destroyOrder.push('parent');
+						},
+					})
+					.build();
+				const child = parent
+					.child('request')
+					.add(ChildService, {
+						create: () => new ChildService(),
+						cleanup: () => {
+							destroyOrder.push('child');
+						},
+					})
+					.build();
+				await parent.resolve(ParentService);
+				await child.resolve(ChildService);
+			}
+
+			expect(destroyOrder).toEqual(['child', 'parent']);
 		});
 	});
 

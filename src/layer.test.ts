@@ -262,6 +262,53 @@ describe('Layer', () => {
 		});
 	});
 
+	describe('Layer.values()', () => {
+		const PortTag = Tag.of('port')<number>();
+		const RegionTag = Tag.of('region')<'eu' | 'us'>();
+		class Logger {
+			level = 'info';
+		}
+
+		it('should bind each tag to its value', async () => {
+			const logger = new Logger();
+			const layer = Layer.values(
+				[PortTag, 3000],
+				[RegionTag, 'eu'],
+				[Logger, logger]
+			);
+
+			const container = Container.from(layer);
+
+			expectTypeOf(layer).toEqualTypeOf<
+				Layer<never, typeof PortTag | typeof RegionTag | typeof Logger>
+			>();
+			expect(
+				await container.resolveAll(PortTag, RegionTag, Logger)
+			).toEqual([3000, 'eu', logger]);
+		});
+
+		it("should check each value against its tag's type", () => {
+			// @ts-expect-error - string is not assignable to number
+			Layer.values([PortTag, '3000'], [RegionTag, 'eu']);
+			// @ts-expect-error - 'asia' is not assignable to 'eu' | 'us'
+			Layer.values([RegionTag, 'asia']);
+		});
+
+		it('should treat a pair binding the same value as a Layer.value() as one provider', async () => {
+			const layer = Layer.values([PortTag, 3000]).merge(
+				Layer.value(PortTag, 3000)
+			);
+
+			expect(await Container.from(layer).resolve(PortTag)).toBe(3000);
+		});
+
+		it('should reject one tag bound to different values', () => {
+			const layer = Layer.values([PortTag, 3000], [PortTag, 4000]);
+
+			expect(() => Container.from(layer)).toThrow(DuplicateProviderError);
+		});
+	});
+
 	describe('Layer.mock()', () => {
 		it('should create a layer with partial mock for ServiceTag', async () => {
 			class UserService {

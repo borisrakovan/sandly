@@ -319,6 +319,39 @@ function createLeafLayer<TRequires extends AnyTag, TProvides extends AnyTag>(
 }
 
 /**
+ * Creates a leaf layer that binds a tag to a value. Bindings of one tag to
+ * `Object.is`-equal values count as one provider.
+ * @internal
+ */
+function valueLayer<T extends AnyTag>(
+	tag: T,
+	value: unknown,
+	site: DefinitionSite
+): Layer<never, T> {
+	// Values are checked against the tag by the public signatures; `Layer.mock`
+	// binds partial implementations.
+	const registeredTag: AnyTag = tag;
+	return createLeafLayer({
+		site,
+		binding: { value },
+		register: (builder) => {
+			builder.add(registeredTag, () => value);
+		},
+	});
+}
+
+/**
+ * `[tag, value]` pairs, each value checked against its tag's type.
+ * @internal
+ */
+type ValueBindings<TTags extends readonly AnyTag[]> = {
+	readonly [K in keyof TTags]: readonly [
+		tag: TTags[K],
+		value: TagType<TTags[K]>,
+	];
+};
+
+/**
  * Registers a class constructed from its dependency list: tags are resolved,
  * raw values are passed through.
  * @internal
@@ -508,12 +541,37 @@ export const Layer = {
 	 * ```
 	 */
 	value<T extends AnyTag>(tag: T, value: TagType<T>): Layer<never, T> {
-		return createLeafLayer({
-			site: definitionSiteOf('value'),
-			binding: { value },
-			register: (builder) => {
-				builder.add(tag, () => value);
-			},
+		return valueLayer(tag, value, definitionSiteOf('value'));
+	},
+
+	/**
+	 * Creates a layer that binds several tags to constant values or
+	 * pre-instantiated instances. Equivalent to merging one `Layer.value()`
+	 * per pair.
+	 *
+	 * Each value is checked against its own tag's type.
+	 *
+	 * @param bindings - `[tag, value]` pairs
+	 *
+	 * @example
+	 * ```typescript
+	 * const configLayer = Layer.values(
+	 *   [DatabaseConfig, config.database],
+	 *   [RegionTag, config.region],
+	 *   [Logger, logger]
+	 * );
+	 * // Type: Layer<never, typeof DatabaseConfig | typeof RegionTag | typeof Logger>
+	 * ```
+	 */
+	values<const TTags extends readonly AnyTag[]>(
+		...bindings: ValueBindings<TTags>
+	): Layer<never, TTags[number]> {
+		const site = definitionSiteOf('values');
+		return createLayer({
+			kind: 'merge',
+			layers: bindings.map(([tag, value]) =>
+				valueLayer(tag, value, site)
+			),
 		});
 	},
 
@@ -562,13 +620,7 @@ export const Layer = {
 			? Partial<TagType<T>> | TagType<T>
 			: TagType<T>
 	): Layer<never, T> {
-		return createLeafLayer({
-			site: definitionSiteOf('mock'),
-			binding: { value: implementation },
-			register: (builder) => {
-				builder.add(tag, () => implementation);
-			},
-		});
+		return valueLayer(tag, implementation, definitionSiteOf('mock'));
 	},
 
 	/**

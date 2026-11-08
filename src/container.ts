@@ -96,7 +96,9 @@ export const ContainerTypeId: unique symbol = Symbol.for('sandly/Container');
  *
  * @template TTags - Union type of registered dependency tags
  */
-export interface IContainer<TTags extends AnyTag = never> {
+export interface IContainer<
+	TTags extends AnyTag = never,
+> extends AsyncDisposable {
 	readonly [ContainerTypeId]: {
 		readonly _TTags: Contravariant<TTags>;
 	};
@@ -105,7 +107,7 @@ export interface IContainer<TTags extends AnyTag = never> {
 	resolveAll: <const T extends readonly TTags[]>(
 		...tags: T
 	) => Promise<{ [K in keyof T]: TagType<T[K]> }>;
-	use: <T extends TTags, R>(
+	useOnce: <T extends TTags, R>(
 		tag: T,
 		fn: (service: TagType<T>) => PromiseOrValue<R>
 	) => Promise<R>;
@@ -485,13 +487,13 @@ export class Container<
 	 *
 	 * @example
 	 * ```typescript
-	 * const result = await container.use(UserService, (service) =>
+	 * const result = await container.useOnce(UserService, (service) =>
 	 *   service.getUsers()
 	 * );
 	 * // Container is automatically destroyed after callback completes
 	 * ```
 	 */
-	async use<T extends TTags, R>(
+	async useOnce<T extends TTags, R>(
 		tag: T,
 		fn: (service: TagType<T>) => PromiseOrValue<R>
 	): Promise<R> {
@@ -541,6 +543,24 @@ export class Container<
 			// Note: We keep factories/finalizers for potential debugging,
 			// but the container is no longer usable
 		}
+	}
+
+	/**
+	 * Destroys the container when an `await using` declaration goes out of scope.
+	 *
+	 * @throws {DependencyFinalizationError} If any finalizers fail
+	 *
+	 * @example
+	 * ```typescript
+	 * async function runJob() {
+	 *   await using container = Container.from(jobLayer);
+	 *   const job = await container.resolve(Job);
+	 *   await job.run();
+	 * } // container.destroy() runs here, even if run() throws
+	 * ```
+	 */
+	async [Symbol.asyncDispose](): Promise<void> {
+		await this.destroy();
 	}
 }
 

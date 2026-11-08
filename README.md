@@ -164,12 +164,15 @@ const db = await container.resolve(Database);
 const [db, users] = await container.resolveAll(Database, UserService);
 
 // Use and discard pattern - resolves, runs callback, then destroys
-const result = await container.use(UserService, (service) =>
+const result = await container.useOnce(UserService, (service) =>
 	service.getUsers()
 );
 
 // Manual clean up
 await container.destroy();
+
+// Or destroy automatically when the scope exits
+await using scoped = Container.from(appLayer);
 ```
 
 Each dependency is created once (singleton) and cached.
@@ -251,17 +254,27 @@ const requestContainer = appContainer.childFrom(
 
 ### Use and Discard Pattern
 
-The `use()` method resolves a service, runs a callback, and automatically destroys the container:
+The `useOnce()` method resolves a service, runs a callback, and automatically destroys the container:
 
 ```typescript
 // Perfect for short-lived operations like Lambda handlers or worker jobs
 const result = await appContainer
 	.childFrom('request', requestLayer)
-	.use(UserService, (service) => service.processEvent(event));
+	.useOnce(UserService, (service) => service.processEvent(event));
 // Container is automatically destroyed after callback completes
 ```
 
 This is especially useful for serverless functions or message handlers where the container lifecycle matches a single operation.
+
+When the operation needs several dependencies, declare the container with `await using` instead. It is destroyed when the scope exits, including by a thrown error:
+
+```typescript
+async function handleRecord(record: SqsRecord) {
+	await using container = appContainer.childFrom('record', recordLayer);
+	const [processor, logger] = await container.resolveAll(Processor, Logger);
+	await processor.process(record);
+} // container.destroy() runs here
+```
 
 ## Working with Layers
 
@@ -301,6 +314,16 @@ class UserService {
 }
 const userService = new UserService();
 const testLayer = Layer.value(UserService, userService);
+```
+
+**Layer.values**: Several bindings at once, each value checked against its tag
+
+```typescript
+const configLayer = Layer.values(
+	[DatabaseConfig, config.database],
+	[ApiKeyTag, process.env.API_KEY!],
+	[Logger, logger]
+);
 ```
 
 **Layer.mock**: Partial mocks for testing (ServiceTags only)
@@ -575,8 +598,9 @@ Resolving a `Layer.unused()` placeholder fails with `UnusedDependencyResolvedErr
 | `Container.scoped(scope)`       | Create an empty scoped container              |
 | `container.resolve(tag)`        | Get a dependency instance                     |
 | `container.resolveAll(...tags)` | Get multiple dependencies                     |
-| `container.use(tag, fn)`        | Resolve, run callback, then destroy container |
+| `container.useOnce(tag, fn)`    | Resolve, run callback, then destroy container |
 | `container.destroy()`           | Run finalizers and clean up                   |
+| `await using container = ...`   | Destroy the container when the scope exits    |
 
 ### ContainerBuilder
 
@@ -593,6 +617,7 @@ Resolving a `Layer.unused()` placeholder fails with `UnusedDependencyResolvedErr
 | `Layer.singleton(class, deps, options?)` | Create layer for a class built only at the root |
 | `Layer.singleton(layer)`                 | Mark a layer as built only at the root          |
 | `Layer.value(tag, value)`                | Create layer for a constant value               |
+| `Layer.values([tag, value], ...)`        | Create layer for several constant values        |
 | `Layer.mock(tag, implementation)`        | Create layer with mock (partial for ServiceTag) |
 | `Layer.create({ requires, apply })`      | Create custom layer                             |
 | `Layer.empty()`                          | Create empty layer                              |

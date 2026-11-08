@@ -1,7 +1,7 @@
 {
 	"compilerOptions": {
 		"target": "es2022",
-		"lib": ["es2022"],
+		"lib": ["es2022", "esnext.disposable"],
 		"module": "NodeNext",
 		"allowJs": true,
 		"esModuleInterop": true,
