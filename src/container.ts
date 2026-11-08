@@ -234,35 +234,14 @@ export class ContainerBuilder<TTags extends AnyTag = never> {
 }
 
 /**
- * Type-safe dependency injection container.
+ * Resolution, caching and destruction shared by `Container` and `ScopedContainer`.
  *
- * Containers are immutable - use `Container.builder()` to create one.
- * Each dependency is created once (singleton) and cached.
+ * Each subclass declares its own static constructors, so their signatures
+ * need not match.
  *
  * @template TTags - Union type of registered dependency tags
- *
- * @example
- * ```typescript
- * class Database {
- *   query(sql: string) { return []; }
- * }
- *
- * class UserService {
- *   constructor(private db: Database) {}
- *   getUsers() { return this.db.query('SELECT * FROM users'); }
- * }
- *
- * const container = Container.builder()
- *   .add(Database, () => new Database())
- *   .add(UserService, async (ctx) =>
- *     new UserService(await ctx.resolve(Database))
- *   )
- *   .build();
- *
- * const userService = await container.resolve(UserService);
- * ```
  */
-export class Container<
+abstract class BaseContainer<
 	TTags extends AnyTag = never,
 > implements IContainer<TTags> {
 	readonly [ContainerTypeId]!: {
@@ -295,7 +274,7 @@ export class Container<
 	protected isDestroyed = false;
 
 	/**
-	 * @internal - Use Container.builder() or Container.empty()
+	 * @internal - Use the subclass's static `builder()`, `empty()` or `from()`
 	 */
 	protected constructor(
 		factories: Map<AnyTag, Factory<unknown, TTags>>,
@@ -304,88 +283,6 @@ export class Container<
 	) {
 		this.factories = factories;
 		this.finalizers = finalizers;
-	}
-
-	/**
-	 * @internal - Used by ContainerBuilder
-	 */
-	static _createFromBuilder<T extends AnyTag>(
-		factories: Map<AnyTag, Factory<unknown, T>>,
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		finalizers: Map<AnyTag, Finalizer<any>>
-	): Container<T> {
-		return new Container(factories, finalizers);
-	}
-
-	/**
-	 * Creates a new container builder.
-	 *
-	 * @example
-	 * ```typescript
-	 * const container = Container.builder()
-	 *   .add(Database, () => new Database())
-	 *   .build();
-	 * ```
-	 */
-	static builder(): ContainerBuilder {
-		return new ContainerBuilder();
-	}
-
-	/**
-	 * Creates an empty container with no dependencies.
-	 *
-	 * Shorthand for `Container.builder().build()`.
-	 */
-	static empty(): Container {
-		return Container.builder().build();
-	}
-
-	/**
-	 * Creates a scoped container for hierarchical dependency management.
-	 *
-	 * Scoped containers support parent/child relationships where children
-	 * can access parent dependencies but maintain their own cache.
-	 *
-	 * @param scope - Identifier for the scope (for debugging)
-	 *
-	 * @example
-	 * ```typescript
-	 * const appContainer = Container.scoped('app');
-	 * // ... add app-level dependencies
-	 *
-	 * const requestContainer = appContainer.child('request');
-	 * // ... add request-specific dependencies
-	 * ```
-	 */
-	static scoped(scope: string | symbol): ScopedContainer {
-		return ScopedContainer.empty(scope);
-	}
-
-	/**
-	 * Creates a container from a layer.
-	 *
-	 * This is a convenience method equivalent to applying a layer to
-	 * `Container.builder()` and building the result.
-	 *
-	 * @param layer - A layer with all dependencies satisfied; a compile error names any missing ones
-	 * @throws {DuplicateProviderError} If two different layers provide the same tag
-	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
-	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
-	 *
-	 * @example
-	 * ```typescript
-	 * const dbLayer = Layer.service(Database, []);
-	 * const container = Container.from(dbLayer);
-	 *
-	 * const db = await container.resolve(Database);
-	 * ```
-	 */
-	static from<TRequires extends AnyTag, TProvides extends AnyTag>(
-		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
-	): Container<TProvides> {
-		const builder = Container.builder();
-		const resultBuilder = layer.apply(builder);
-		return resultBuilder.build();
 	}
 
 	/**
@@ -598,6 +495,121 @@ export class Container<
 }
 
 /**
+ * Type-safe dependency injection container.
+ *
+ * Containers are immutable - use `Container.builder()` to create one.
+ * Each dependency is created once (singleton) and cached.
+ *
+ * @template TTags - Union type of registered dependency tags
+ *
+ * @example
+ * ```typescript
+ * class Database {
+ *   query(sql: string) { return []; }
+ * }
+ *
+ * class UserService {
+ *   constructor(private db: Database) {}
+ *   getUsers() { return this.db.query('SELECT * FROM users'); }
+ * }
+ *
+ * const container = Container.builder()
+ *   .add(Database, () => new Database())
+ *   .add(UserService, async (ctx) =>
+ *     new UserService(await ctx.resolve(Database))
+ *   )
+ *   .build();
+ *
+ * const userService = await container.resolve(UserService);
+ * ```
+ */
+export class Container<
+	TTags extends AnyTag = never,
+> extends BaseContainer<TTags> {
+	/**
+	 * @internal - Used by ContainerBuilder
+	 */
+	static _createFromBuilder<T extends AnyTag>(
+		factories: Map<AnyTag, Factory<unknown, T>>,
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		finalizers: Map<AnyTag, Finalizer<any>>
+	): Container<T> {
+		return new Container(factories, finalizers);
+	}
+
+	/**
+	 * Creates a new container builder.
+	 *
+	 * @example
+	 * ```typescript
+	 * const container = Container.builder()
+	 *   .add(Database, () => new Database())
+	 *   .build();
+	 * ```
+	 */
+	static builder(): ContainerBuilder {
+		return new ContainerBuilder();
+	}
+
+	/**
+	 * Creates an empty container with no dependencies.
+	 *
+	 * Shorthand for `Container.builder().build()`.
+	 */
+	static empty(): Container {
+		return Container.builder().build();
+	}
+
+	/**
+	 * Creates a scoped container for hierarchical dependency management.
+	 *
+	 * Scoped containers support parent/child relationships where children
+	 * can access parent dependencies but maintain their own cache.
+	 *
+	 * @param scope - Identifier for the scope (for debugging)
+	 *
+	 * @example
+	 * ```typescript
+	 * const appContainer = Container.scoped('app');
+	 * // ... add app-level dependencies
+	 *
+	 * const requestContainer = appContainer.child('request');
+	 * // ... add request-specific dependencies
+	 * ```
+	 */
+	static scoped(scope: string | symbol): ScopedContainer {
+		return ScopedContainer.empty(scope);
+	}
+
+	/**
+	 * Creates a container from a layer.
+	 *
+	 * This is a convenience method equivalent to applying a layer to
+	 * `Container.builder()` and building the result.
+	 *
+	 * @param layer - A layer with all dependencies satisfied; a compile error names any missing ones
+	 * @throws {DuplicateProviderError} If two different layers provide the same tag
+	 * @throws {DuplicateOverrideError} If two different overrides replace the same tag
+	 * @throws {OverrideTargetNotFoundError} If an override replaces a tag that no other layer provides
+	 *
+	 * @example
+	 * ```typescript
+	 * const dbLayer = Layer.service(Database, []);
+	 * const container = Container.from(dbLayer);
+	 *
+	 * const db = await container.resolve(Database);
+	 * ```
+	 */
+	static from<TRequires extends AnyTag, TProvides extends AnyTag>(
+		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
+	): Container<TProvides> {
+		const builder = Container.builder();
+		const resultBuilder = layer.apply(builder);
+		return resultBuilder.build();
+	}
+}
+
+/**
  * Scope identifier type.
  */
 export type Scope = string | symbol;
@@ -685,10 +697,9 @@ export class ScopedContainerBuilder<TTags extends AnyTag = never> {
  * const ctx = await requestContainer.resolve(RequestContext);
  * ```
  */
-// @ts-expect-error - ScopedContainer overrides the empty method
 export class ScopedContainer<
 	TTags extends AnyTag = never,
-> extends Container<TTags> {
+> extends BaseContainer<TTags> {
 	public readonly scope: Scope;
 	private parent: IContainer<TTags> | null;
 	private readonly children: WeakRef<ScopedContainer<TTags>>[] = [];
@@ -733,14 +744,14 @@ export class ScopedContainer<
 	 *   .build();
 	 * ```
 	 */
-	static override builder(scope: Scope): ScopedContainerBuilder {
+	static builder(scope: Scope): ScopedContainerBuilder {
 		return new ScopedContainerBuilder(scope, null);
 	}
 
 	/**
 	 * Creates an empty scoped container with no dependencies.
 	 */
-	static override empty(scope: Scope): ScopedContainer {
+	static empty(scope: Scope): ScopedContainer {
 		return ScopedContainer.builder(scope).build();
 	}
 
@@ -764,7 +775,7 @@ export class ScopedContainer<
 	 * const db = await container.resolve(Database);
 	 * ```
 	 */
-	static override from<TRequires extends AnyTag, TProvides extends AnyTag>(
+	static from<TRequires extends AnyTag, TProvides extends AnyTag>(
 		scope: Scope,
 		layer: Layer<TRequires, TProvides> & SatisfiedAtRoot<TRequires>
 	): ScopedContainer<TProvides> {

@@ -38,6 +38,11 @@ export default tseslint.config(
 		},
 	},
 	{
-		ignores: ['**/dist/**', 'eslint.config.js', '**/*.local.*'],
+		ignores: [
+			'**/dist/**',
+			'coverage/**',
+			'eslint.config.js',
+			'**/*.local.*',
+		],
 	}
 );

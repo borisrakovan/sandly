@@ -68,7 +68,7 @@ pnpm add sandly
 yarn add sandly
 ```
 
-Requires TypeScript 5.0+.
+Requires TypeScript 5.0+ and the disposable types, which come from `@types/node` (or Bun's types) or from `esnext.disposable` in `lib` (TypeScript 5.2+).
 
 ## Quick Start
 
